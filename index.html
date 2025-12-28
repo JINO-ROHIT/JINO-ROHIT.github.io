@@ -6,14 +6,7 @@
     <title>Jino Rohit</title>
 
     <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
-
     <script src="https://unpkg.com/lucide@latest"></script>
-
-    <script
-      id="MathJax-script"
-      async
-      src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
-    ></script>
 
     <script
       async
@@ -29,29 +22,38 @@
     </script>
   </head>
 
-  <body class="bg-orange-50 text-gray-900 w-full max-w-3xl mx-auto px-5 md:px-0 pb-8">
+  <body class="bg-orange-50 text-gray-900 w-full max-w-3xl mx-auto px-5 md:px-0 pb-10">
+    <!-- Nav -->
     <nav class="flex justify-between items-center py-6 border-b border-gray-300">
-      <h1 class="font-serif text-3xl font-bold">Jino's Blog</h1>
-      <div class="flex gap-6">
+      <h1 class="font-serif text-3xl font-bold">Jino Rohit</h1>
+      <div class="flex gap-6 text-sm">
         <a href="index.html" class="hover:text-orange-600 transition">Home</a>
         <a href="./blogs/blog.html" class="hover:text-orange-600 transition">Blogs</a>
         <a href="./projects/projects.html" class="hover:text-orange-600 transition">Projects</a>
       </div>
     </nav>
 
-    <section class="mt-6 space-y-3">
-      <h2 class="text-lg">
-        Hi, I’m <span class="font-semibold">Jino Rohit</span>  a Machine Learning Engineer.
+    <!-- Intro -->
+    <section class="mt-8 space-y-4">
+      <h2 class="text-xl leading-snug">
+        Hi, I’m <span class="font-semibold">Jino</span> - a
+        <span class="font-semibold">Machine Learning Engineer</span> working at a startup.
       </h2>
-      <p class="text-lg">
-        At the moment, working on LLM performance optimization and inference engines.
+
+      <p class="text-lg text-gray-700">
+        I'm currently focussed on <span class="font-medium">LLM inference and kernel-level optimization</span>
+        using <span class="font-medium">C++ and CUDA</span>.
+      </p>
+
+      <p class="text-gray-600">
+        I'm looking to work on low-level ML systems,
+        compilers, runtimes, and GPU performance.
       </p>
     </section>
 
-    <div class="flex gap-4 mt-6">
-      <h2 class="text-lg">
-        Find me at
-      </h2>
+    <!-- Links -->
+    <div class="flex flex-wrap gap-6 mt-6 items-center">
+      <span class="text-sm text-gray-600">Find me at</span>
 
       <a
         href="https://x.com/jino_rohit"
@@ -59,56 +61,93 @@
       >
         <i data-lucide="twitter"></i> Twitter
       </a>
+
       <a
         href="https://github.com/JINO-ROHIT"
         class="flex items-center gap-2 hover:text-orange-600 font-medium"
       >
         <i data-lucide="github"></i> GitHub
       </a>
+
       <a
         href="mailto:find.jinorohit@gmail.com"
         class="flex items-center gap-2 hover:text-orange-600 font-medium"
-        >
-        <i data-lucide="mail"></i> Gmail
-        </a>
-
+      >
+        <i data-lucide="mail"></i> Email
+      </a>
     </div>
 
-  <section class="mt-6">
-    <h2 class="text-2xl font-semibold mb-4">Open Source Contributions</h2>
+    <!-- Track Record -->
+    <section class="mt-10">
+      <h2 class="text-2xl font-semibold mb-4">Competitions</h2>
+      <ul class="list-disc list-inside space-y-2 text-gray-700">
+        <li>
+          Kaggle competitor with <span class="font-medium">2 bronze medals</span>;
+          peak global rank <span class="font-medium">#1,499</span>.
+        </li>
+        <li>
+          <span class="font-medium">5+ hackathon wins</span> across national and global events.
+        </li>
+      </ul>
+    </section>
 
-    <div class="space-y-6">
+    <!-- Open Source -->
+    <section class="mt-10">
+      <h2 class="text-2xl font-semibold mb-6">Open Source Contributions</h2>
 
-      <div class="flex gap-4">
-        <img src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" class="w-6 h-6 mt-1" alt="GitHub" />
-        <div>
-          <h3 class="text-lg font-semibold">Camel-AI</h3>
-          <p class="text-sm text-gray-600">Built core features and integrations (Jina-AI, lmstudio, Wolfram, etc.).</p>
-          <p class="text-xs text-gray-500 mt-1">Top 10 Contributor · 45 PRs</p>
+      <div class="space-y-6">
+        <!-- Camel AI -->
+        <div class="flex gap-4">
+          <img
+            src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"
+            class="w-6 h-6 mt-1"
+            alt="GitHub"
+          />
+          <div>
+            <h3 class="text-lg font-semibold">Camel-AI</h3>
+            <p class="text-sm text-gray-700">
+              Core contributor focused on model providers, toolkits, and infra-level features.
+              Regularly review PRs and help shape design decisions.
+            </p>
+            <p class="text-xs text-gray-500 mt-1">Top 10 contributor</p>
+          </div>
+        </div>
+
+        <!-- Sentence Transformers -->
+        <div class="flex gap-4">
+          <img
+            src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"
+            class="w-6 h-6 mt-1"
+            alt="GitHub"
+          />
+          <div>
+            <h3 class="text-lg font-semibold">Sentence-Transformers</h3>
+            <p class="text-sm text-gray-700">
+              Added MCC metric for evaluation, expanded test coverage,
+              and fixed several edge-case bugs.
+            </p>
+            <p class="text-xs text-gray-500 mt-1">Top 10 contributor</p>
+          </div>
+        </div>
+
+        <!-- HF PEFT -->
+        <div class="flex gap-4">
+          <img
+            src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"
+            class="w-6 h-6 mt-1"
+            alt="GitHub"
+          />
+          <div>
+            <h3 class="text-lg font-semibold">Hugging Face PEFT</h3>
+            <p class="text-sm text-gray-700">
+              Implemented the exclude_modules
+              parameter in <span class="font-medium">LoRAConfig</span>,
+              improving fine-tuning control for large models.
+            </p>
+          </div>
         </div>
       </div>
-
-      <div class="flex gap-4">
-        <img src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" class="w-6 h-6 mt-1" alt="GitHub" />
-        <div>
-          <h3 class="text-lg font-semibold">Sentence Transformers</h3>
-          <p class="text-sm text-gray-600">Added MCC loss, bug fixes, expanded test coverage.</p>
-          <p class="text-xs text-gray-500 mt-1">Top 10 Contributor · 12 PRs</p>
-        </div>
-      </div>
-
-      <div class="flex gap-4">
-        <img src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" class="w-6 h-6 mt-1" alt="GitHub" />
-        <div>
-          <h3 class="text-lg font-semibold">Hugging Face PEFT</h3>
-          <p class="text-sm text-gray-600">Implemented core LoraConfig exclude module and created example notebooks.</p>
-          <p class="text-xs text-gray-500 mt-1">Top 20 Contributor · 5 PRs</p>
-        </div>
-      </div>
-
-    </div>
-  </section>
-
+    </section>
 
     <script>
       lucide.createIcons();
