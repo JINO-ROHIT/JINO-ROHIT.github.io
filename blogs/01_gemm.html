@@ -38,7 +38,7 @@
       <h1 class="font-serif text-4xl font-bold leading-tight text-gray-950">
         Understanding GEMM: From Naive to Optimized Matrix Multiplication in C++[WIP]
       </h1>
-      <p class="text-sm text-gray-600 mt-4 italic">January 4, 2026 • x min read</p>
+      <p class="text-sm text-gray-600 mt-4 italic">January 4, 2026 • 10 min read</p>
     </header>
 
     <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
@@ -149,10 +149,224 @@
     \text{FLOPs} = N^2 \times 2N = \mathcal{O}(2N^3)
     $$
   </div>
-
-
-
   </section>
+
+
+  <!-- optimization logbook -->
+  <section class="space-y-4">
+    <h2 class="text-2xl font-serif font-bold text-gray-950">Optimization Logbook</h2>
+    <p>
+      This is a series of implementations of GEMM in C++, each building on the previous with targeted optimizations.
+      Benchmarks are measured on a Mac M4 Air (10 core CPU) multiplying two \(2048 \times 2048\) matrices. The compiler used is g++ with no optimization flags to isolate the effects of each code change.
+    </p>
+
+    <p class="italic text-sm text-gray-500"> Note* I use 1D arrays with stride based indexing to represent 2D matrices. The element at [i][j] is accessed as array[i * stride + j]</p>
+  </section>
+
+  <section class="space-y-4">
+        <div class="flex items-center gap-2">
+            <h2 class="text-2xl font-serif italic text-gray-950">1. Naive Implementation</h2>
+        </div>
+        <p>the most natural way to perform matrix multiplication is the triple nested loop.</p>
+        <pre class="bg-gray-900 text-gray-100 p-5 rounded-lg overflow-x-auto text-sm font-mono"><code>
+for(int i = 0; i < rows; i++){
+    for(int j = 0; j < cols; j++){
+      int sum = 0;
+      for(int k = 0; k < cols; k++){
+        sum += M[i * stride + k] * N[k * stride + j];
+        O[i * stride + j] = sum;
+    }
+  }
+}
+    </code></pre>
+
+      <div class="p-4 mt-4">
+        <p class="font-semibold mb-2">Performance:</p>
+        <ul class="list-disc list-inside space-y-2">
+          <li>Runtime: \(34,500\) ms</li>
+          <li>Total FLOPs: \(17.2\) GFLOPs</li>
+        </ul>
+      </div>
+      </section>
+
+<section class="space-y-4">
+  <div class="flex items-center gap-2">
+    <h2 class="text-2xl font-serif italic text-gray-950">2. Register Optimization</h2>
+  </div>
+  
+  <p>take a look at this line <code class="bg-gray-100 px-2 py-1 rounded text-sm">O[i * stride + j] = sum;</code> do you notice something wrong about where it is placed?</p>
+  
+  <p>
+    In the naive implementation, for every single multiplication and addition operation, 
+    we're also performing a memory write to <code class="bg-gray-100 px-2 py-1 rounded text-sm">O[i * stride + j]</code>. 
+  </p>
+  
+  <p>
+    What if we move the write outside the innermost loop. Now <code class="bg-gray-100 px-2 py-1 rounded text-sm">sum</code> accumulates in a CPU register, and we only write the final result to memory once per output element.
+  </p>
+  
+  <pre class="bg-gray-900 text-gray-100 p-5 rounded-lg overflow-x-auto text-sm font-mono"><code>for(int i = 0; i < rows; i++){
+    for(int j = 0; j < cols; j++){
+      int sum = 0;
+      for(int k = 0; k < cols; k++){
+        sum += M[i * stride + k] * N[k * stride + j];
+      }
+      O[i * stride + j] = sum;  // moved outside the k loop
+    }
+  }</code></pre>
+  
+  <div class="p-4 mt-4">
+    <p class="font-semibold mb-2">Performance:</p>
+    <ul class="list-disc list-inside space-y-2">
+      <li>Runtime: \(26,520\) ms</li>
+      <li>Speedup: \(1.3\times\) faster</li>
+    </ul>
+  </div>
+  
+  <p class="font-medium">Easy gains!</p>
+</section>
+
+     <section class="space-y-4">
+  <div class="flex items-center gap-2">
+    <h2 class="text-2xl font-serif italic text-gray-950">3. Loop Reordering</h2>
+  </div>
+  
+  <p>
+    The previous optimizations helped, but we're still thrashing the cache. Our memory access pattern jumps around randomly instead of reading sequentially.
+  </p>
+
+  <div class=" p-4 my-4">
+    <p class="font-semibold mb-2">Understanding Cache Lines</p>
+    <p>
+      The data is stored in memory sequentially row by row (row major order).
+      When the CPU requests a single byte from memory, it doesn't just load that byte, 
+      it loads an entire <strong>cache line</strong> (typically 64 bytes). 
+      If your next memory access is nearby, great! If not, you've wasted that entire cache line.
+    </p>
+  </div>
+
+  <p>
+    In our register optimized version with loop order ijk, look at what happens:
+  </p>
+
+  <pre class="bg-gray-900 text-gray-100 p-5 rounded-lg overflow-x-auto text-sm font-mono"><code>
+for(int i = 0; i < N; i++){
+    for(int j = 0; j < N; j++){
+      int sum = 0;
+      for(int k = 0; k < N; k++){
+        sum += M[i * N + k] * N[k * N + j];  // N[k * N + j] jumps by N each time!
+      }
+      O[i * N + j] = sum;
+    }
+}</code></pre>
+
+  <ul class="list-disc list-inside ml-4">
+    <li>The access pattern for matrix \(M\) is: \(M[i*N+0]\), \(M[i*N+1]\), \(M[i*N+2]\)... 
+      We're accessing row \(i\) sequentially, which is great for cache locality. </li>
+    <li>The access pattern for matrix \(N\) is: \(N[0*N+j]\), \(N[1*N+j]\), \(N[2*N+j]\)... 
+      We're accessing column \(j\), jumping by \(N\) elements (e.g. \(2048\) x \(4\) bytes = \(8\)KB) each iteration. 
+      This completely misses the cache, we load a \(64\) byte cache line but only use \(4\) bytes from it!
+  </ul>
+
+  <p>
+    The solution is to reorder the loops to ikj:
+  </p>
+
+  <pre class="bg-gray-900 text-gray-100 p-5 rounded-lg overflow-x-auto text-sm font-mono"><code>
+for(int i = 0; i < rows; i++){
+    for(int k = 0; k < cols; k++){ // 'k' moved to the middle
+        int temp_M = M[i * stride + k]; // load once, use for the whole 'j' loop
+        for(int j = 0; j < cols; j++){ // 'j' is now the innermost
+            O[i * stride + j] += temp_M * N[k * stride + j];
+        }
+    }
+}
+</code></pre>
+
+
+  <div class="p-4 mt-4">
+    <p class="font-semibold mb-2">Performance:</p>
+    <ul class="list-disc list-inside space-y-2">
+      <li>Runtime: \(8,000\) ms</li>
+      <li>Total speedup: \(4.3\) times faster than naive implementation</li>
+    </ul>
+  </div>
+</section>
+
+<section class="space-y-4">
+  <div class="flex items-center gap-2">
+    <h2 class="text-2xl font-serif italic text-gray-950">4. Compiler Flags</h2>
+  </div>
+  
+  <p>
+    Our final optimization involves using compiler flags to enable automatic optimizations:
+  </p>
+  
+  <ul class="list-disc list-inside space-y-2 ml-4">
+    <li>
+      <code class="bg-gray-100 px-2 py-1 rounded text-sm">-O3</code> enables high level optimizations such as function inlining, loop unrolling, and vectorization.
+    </li>
+    <li>
+      <code class="bg-gray-100 px-2 py-1 rounded text-sm">-march=native</code> allows the compiler to use CPU specific instructions for my architecture.
+    </li>
+    <li>
+      <code class="bg-gray-100 px-2 py-1 rounded text-sm">-ffast-math</code> enables a range of optimizations that provide faster, though sometimes less precise, mathematical operations.
+    </li>
+  </ul>
+
+
+  <div class="p-4 mt-4">
+    <p class="font-semibold mb-2">Performance:</p>
+    <ul class="list-disc list-inside space-y-2">
+      <li>Runtime: \(527\) ms</li>
+      <li>Total speedup: \(65\) x faster!</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <h2 class="text-3xl font-serif font-bold">Conclusion</h2>
+  
+  <div class="overflow-x-auto my-6">
+    <table class="w-full border-collapse border border-gray-300">
+      <thead>
+        <tr class="bg-orange-100">
+          <th class="border border-gray-300 px-4 py-2 text-left">Optimization</th>
+          <th class="border border-gray-300 px-4 py-2 text-right">Runtime (ms)</th>
+          <th class="border border-gray-300 px-4 py-2 text-right">Speedup</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="border border-gray-300 px-4 py-2">1. Naive Implementation</td>
+          <td class="border border-gray-300 px-4 py-2 text-right">\(34,500\)</td>
+          <td class="border border-gray-300 px-4 py-2 text-right">\(1.0\)×</td>
+        </tr>
+        <tr class="bg-orange-50">
+          <td class="border border-gray-300 px-4 py-2">2. Register Optimization</td>
+          <td class="border border-gray-300 px-4 py-2 text-right">\(26,520\)</td>
+          <td class="border border-gray-300 px-4 py-2 text-right">\(1.3\)×</td>
+        </tr>
+        <tr>
+          <td class="border border-gray-300 px-4 py-2">3. Loop Reordering</td>
+          <td class="border border-gray-300 px-4 py-2 text-right">\(8,000\)</td>
+          <td class="border border-gray-300 px-4 py-2 text-right">\(4.3\)×</td>
+        </tr>
+        <tr class="bg-orange-50">
+          <td class="border border-gray-300 px-4 py-2">4. Compiler Flags</td>
+          <td class="border border-gray-300 px-4 py-2 text-right">\(527\)</td>
+          <td class="border border-gray-300 px-4 py-2 text-right">\(65\)×</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+
+  <p>
+    While this implementation is significantly faster, there are still many techniques to further improve this using tiling, SIMD vectorization, and parallelization. 
+  </p>
+
+</section>
 
 </article>
 
