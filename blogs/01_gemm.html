@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Understanding GEMM</title>
+
+    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body);"></script>
+
+    <script
+      async
+      src="https://www.googletagmanager.com/gtag/js?id=G-4VP1VKLPKJ"
+    ></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag() { dataLayer.push(arguments); }
+      gtag("js", new Date());
+      gtag("config", "G-4VP1VKLPKJ");
+    </script>
+  </head>
+
+  <body class="bg-orange-50 text-gray-900 w-full max-w-3xl mx-auto px-5 md:px-0 pb-20">
+    <nav class="flex justify-between items-center py-6 border-b border-gray-300">
+      <h1 class="font-serif text-3xl font-bold">Jino Rohit</h1>
+      <div class="flex gap-6 text-sm">
+        <a href="../index.html" class="hover:text-orange-600 transition">Home</a>
+        <a href="./blog.html" class="hover:text-orange-600 transition">Blogs</a>
+        <a href="../projects/projects.html" class="hover:text-orange-600 transition">Projects</a>
+      </div>
+    </nav>
+
+    <header class="mt-12">
+      <h1 class="font-serif text-4xl font-bold leading-tight text-gray-950">
+        Understanding GEMM: From Naive to Optimized Matrix Multiplication in C++[WIP]
+      </h1>
+      <p class="text-sm text-gray-600 mt-4 italic">January 4, 2026 • x min read</p>
+    </header>
+
+    <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
+  
+  <section class="space-y-4">
+    <p>
+      General Matrix Multiply (GEMM) is the core operation of neural networks.
+      Whether you're running a large language model or a vision transformer,
+      almost everything eventually reduces to matrix multiplication.
+    </p>
+
+    <p>
+      At its core, GEMM computes each output element as a dot product:
+    </p>
+
+    <div class="py-4 text-center text-2xl">
+      $$ c_{ij} = \sum_{k=1}^{n} a_{ik} \cdot b_{kj} $$
+    </div>
+
+    <p>
+      In this post, I'll walk through GEMM in C++ starting from a naive implementation
+      and gradually building optimized versions.
+    </p>
+  </section>
+
+  <section class="space-y-4">
+    <h2 class="text-2xl font-serif font-bold text-gray-950">
+      What exactly are FLOPs?
+    </h2>
+
+    <p>
+      FLOPs stands for <em>Floating Point Operations</em>.
+      It's simply a count of how many arithmetic operations
+      (mainly multiplications and additions)
+      are required to perform a computation.
+    </p>
+
+    <p>
+      FLOPs don't tell you everything about performance,
+      but they give a very useful baseline for understanding
+      why matrix multiplication scales the way it does.
+    </p>
+  </section>
+
+  <section class="space-y-4 font-serif">
+    <p>
+      Alright, let's take a <span class="font-mono">2x2</span> matrix and try to calculate FLOPS by hand.
+    </p>
+
+    <h3 class="text-xl font-bold">Step 1</h3>
+
+    <img src="artifacts/image.png" class="mx-auto my-4" />
+
+    <p>
+      To compute the first output element, we performed:
+    </p>
+
+    <ul class="list-disc list-inside ml-4">
+      <li><span class="font-mono">2</span> multiplications</li>
+      <li><span class="font-mono">1</span> addition</li>
+    </ul>
+
+    <p class="mt-2">
+      That's a total of <span class="font-mono">3</span> FLOPs for a single output element.
+    </p>
+
+    <p>
+      Okay one more, just to be sure.
+    </p>
+
+    <h3 class="text-xl font-bold">Step 2</h3>
+
+    <img src="artifacts/image2.png" class="mx-auto my-4" />
+
+    <p>
+      We again did <span class="font-mono">2</span> multiplies + <span class="font-mono">1</span> add = <span class="font-mono">3</span> FLOPs.
+    </p>
+
+    <p>
+      Since a <span class="font-mono">2x2</span> output matrix has
+      4 elements:
+    </p>
+
+    <p class="text-lg text-center">
+      Total FLOPs = <span class="font-mono">4</span> × <span class="font-mono">3</span> = <span class="font-mono">12</span>
+    </p>
+
+  </section>
+
+  <section class="space-y-4">
+
+    <p>
+      For an <span class="font-mono">\(N \times N\)</span> matrix multiplication:
+    </p>
+
+    <ul class="list-disc list-inside space-y-2 ml-4 text-gray-700">
+      <li>Output matrix has <strong>\(N^2\)</strong> elements</li>
+      <li>Each element performs <strong>\(N\)</strong> multiplications</li>
+      <li>Each element performs <strong>\(N - 1\)</strong> additions</li>
+      <li>
+      Total operations per element:
+      <strong>\(N + (N - 1) \approx 2N\)</strong>
+      </li>
+    </ul>
+
+    <div class="py-2 text-center text-xl">
+    $$
+    \text{FLOPs} = N^2 \times 2N = \mathcal{O}(2N^3)
+    $$
+  </div>
+
+
+
+  </section>
+
+</article>
+
+
+    <script>
+      lucide.createIcons();
+    </script>
+  </body>
+</html>
