@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NVIDIA CuTe - A Primer to Understanding Layouts</title>
+
+    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body);"></script>
+
+    <script
+      async
+      src="https://www.googletagmanager.com/gtag/js?id=G-4VP1VKLPKJ"
+    ></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag() { dataLayer.push(arguments); }
+      gtag("js", new Date());
+      gtag("config", "G-4VP1VKLPKJ");
+    </script>
+  </head>
+
+  <body class="bg-orange-50 text-gray-900 w-full max-w-3xl mx-auto px-5 md:px-0 pb-20">
+    <nav class="flex justify-between items-center py-6 border-b border-gray-300">
+      <h1 class="font-serif text-3xl font-bold">Jino Rohit</h1>
+      <div class="flex gap-6 text-sm">
+        <a href="../index.html" class="hover:text-orange-600 transition">Home</a>
+        <a href="./blog.html" class="hover:text-orange-600 transition">Blogs</a>
+        <a href="../projects/projects.html" class="hover:text-orange-600 transition">Projects</a>
+      </div>
+    </nav>
+
+    <header class="mt-12">
+      <h1 class="font-serif text-4xl font-bold leading-tight text-gray-950">
+        NVIDIA CuTe - A Primer to Understanding Layouts
+      </h1>
+      <p class="text-sm text-gray-600 mt-4 italic">February 21, 2026 • 10 min read</p>
+    </header>
+
+    <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
+  
+  <section class="space-y-4">
+    <p>
+      CuTe is a collection of C++ CUDA template abstractions for defining and operating on hierarchically multidimensional layouts of threads and data. 
+      CuTe provides Layout and Tensor objects that compactly packages the type, shape, memory space, and layout of data, 
+      while performing the complicated indexing for the user. 
+    </p>
+
+    <p>
+      This blog will walk you through the three main types of layouts that is used in CuTe templates.
+    </p>
+  </section>
+
+  <section class="space-y-4">
+    <h2 class="text-2xl font-serif font-bold text-gray-950">
+      What exactly are Layouts?
+    </h2>
+
+    <p>
+        Layouts describe how data is stored in the memory of the computer. Suppose you have a tensor, given the shape of the tensor and the stride, you can map
+        the logical co-ordinates to the physical co-ordinate in the memory.
+    </p>
+   </section>
+
+
+    <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+            1D Tensors
+        </h2>
+
+        <p>
+            <img src="artifacts/1d-tensor.png" class="mx-auto my-4" />
+        </p>
+
+        <p>
+            In this figure, we have a 1D tensor with 10 elements. You can reach the next element by jumping by 1 space. These together just comprised our layout!
+            Layout = (shape, stride)
+                   = (10, 1)
+        </p>
+    </section>
+
+    <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+            2D Tensors
+        </h2>
+
+        <p>
+            <img src="artifacts/2d.png" class="mx-auto my-4" />
+        </p>
+
+        <p>
+            For 2D tensors, you need two dimension - one across the row and another across the column. This two dimensional space is the logical representation 
+            of the tensor. But remember in the computer, the physical representation is still one dimensional. So how do we make this mapping? Layouts again dummy :)
+        </p>
+
+        <p>
+            But if they need to be squished into a 1d layout, which dimension do we iterate from? This is where row major and column major formats enter.
+        </p>
+
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+            Row major format
+        </h2>
+
+        <p>
+            In this format, you store the elements in a row wise fashion. Let's look at an example to better understand this.
+        </p>
+
+
+    </section>
+
+
+</article>
+
+
+    <script>
+      lucide.createIcons();
+    </script>
+  </body>
+</html>
