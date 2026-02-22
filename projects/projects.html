@@ -32,30 +32,18 @@
   <body class="bg-orange-50 text-gray-900 w-full max-w-3xl mx-auto px-5 md:px-0 pb-8">
     <nav class="flex justify-between items-center py-6 border-b border-gray-300">
       <h1 class="font-serif text-3xl font-bold">Jino's Blog</h1>
-      <div class="flex gap-6">
+      <div class="flex gap-6 text-sm">
         <a href="../index.html" class="hover:text-orange-600 transition">Home</a>
         <a href="../blogs/blog.html" class="hover:text-orange-600 transition">Blogs</a>
         <a href="./projects.html" class="hover:text-orange-600 transition">Projects</a>
       </div>
     </nav>
 
-    <section class="mt-6">
+    <!-- <section class="mt-6">
       <h2 class="text-2xl font-semibold mb-4">Projects</h2>
 
       <div class="space-y-6">
 
-        <!-- <div class="flex gap-4">
-          <img src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" class="w-6 h-6 mt-1" alt="GitHub" />
-          <div>
-            <h3 class="text-lg font-semibold">
-              <a href="https://github.com/JINO-ROHIT/tachyon" class="hover:text-orange-600 transition">Tachyon</a>
-            </h3>
-            <p class="text-sm text-gray-600">
-              Tachyon is a C++ inference engine for LLMs that run on CPU. 
-              This library is a collection of all the modern LLM architectures written from scratch and designed to run on consumer hardware.
-            </p>
-          </div>
-        </div> -->
 
         <div class="flex gap-4">
           <img src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" class="w-6 h-6 mt-1" alt="GitHub" />
@@ -129,7 +117,61 @@
 
 
       </div>
-    </section>
+    </section> -->
+
+
+    <section class="mt-8">
+  <h2 class="text-2xl font-semibold mb-6">Projects</h2>
+
+  <ul class="list-none space-y-4">
+
+    <a href="https://github.com/JINO-ROHIT/fastcv" target="_blank" class="block">
+      <li class="flex justify-between items-center hover:underline underline-offset-4 py-2">
+        <span class="text-gray-500 w-40">C++ / CUDA</span>
+        <span class="flex-1 font-mono text-lg">
+          fastcv - fastcv is a C++ CUDA rewrite with Pytorch bindings of the image filters in the OpenCV library.
+        </span>
+      </li>
+    </a>
+
+    <a href="https://github.com/JINO-ROHIT/inferGPT" target="_blank" class="block">
+      <li class="flex justify-between items-center hover:underline underline-offset-4 py-2">
+        <span class="text-gray-500 w-40">C / C++</span>
+        <span class="flex-1 font-mono text-lg">
+          InferGPT - A high performance C/C++ inference engine for GPT based architectures that runs on CPU.
+        </span>
+      </li>
+    </a>
+
+    <a href="https://github.com/JINO-ROHIT/gpt-triton" target="_blank" class="block">
+      <li class="flex justify-between items-center hover:underline underline-offset-4 py-2">
+        <span class="text-gray-500 w-40">Triton</span>
+        <span class="flex-1 font-mono text-lg">
+          Triton GPT2 - Implementing GPT-2 architecture in triton.
+        </span>
+      </li>
+    </a>
+
+    <a href="https://github.com/JINO-ROHIT/mnist-cuda" target="_blank" class="block">
+      <li class="flex justify-between items-center hover:underline underline-offset-4 py-2">
+        <span class="text-gray-500 w-40">CUDA</span>
+        <span class="flex-1 font-mono text-lg">
+          MNIST - A CUDA implementation of a simple feedforward neural network and benchmark against libraries like pytorch.
+        </span>
+      </li>
+    </a>
+
+    <a href="https://github.com/JINO-ROHIT/advanced_ml" target="_blank" class="block">
+      <li class="flex justify-between items-center hover:underline underline-offset-4 py-2">
+        <span class="text-gray-500 w-40">ML Theory</span>
+        <span class="flex-1 font-mono text-lg">
+          Advanced ML - A collection of advanced machine learning topics implemented from scratch.
+        </span>
+      </li>
+    </a>
+
+  </ul>
+</section>
 
     <script>
       lucide.createIcons();
