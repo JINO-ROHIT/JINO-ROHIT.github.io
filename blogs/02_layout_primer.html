@@ -50,9 +50,6 @@
       while performing the complicated indexing for the user. 
     </p>
 
-    <p>
-      This blog will walk you through the three main types of layouts that is used in CuTe templates.
-    </p>
   </section>
 
   <section class="space-y-4">
@@ -124,7 +121,7 @@
 
         <p>
             For 2D tensors, you need two dimension - one across the row and another across the column. This two dimensional space is the logical representation 
-            of the tensor. But remember in the computer, the physical representation is still a single flat array. So how do we make this mapping? Layouts again dummy :)
+            of the tensor. But remember in the computer, the physical representation is still a single flat array.
         </p>
 
         <!-- <p>
@@ -201,7 +198,7 @@
         themselves be tuples creating a hierarchy of dimensions.
       </p>
       <p>
-        You have a 128xx 128 matrix, and you want to partition it into
+        You have a 128 x 128 matrix, and you want to partition it into
         32 x 32 tiles for processing by thread blocks. Each tile is itself laid out row major. A nested
         layout lets you express this tiling directly, instead of computing index arithmetic by hand.
       </p>
