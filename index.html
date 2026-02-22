@@ -91,11 +91,10 @@
     </section>
 
     <!-- Open Source -->
-    <section class="mt-10">
+    <!-- <section class="mt-10">
       <h2 class="text-2xl font-semibold mb-6">Open Source Contributions</h2>
 
       <div class="space-y-6">
-        <!-- Camel AI -->
         <div class="flex gap-4">
           <img
             src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"
@@ -111,7 +110,6 @@
           </div>
         </div>
 
-        <!-- Sentence Transformers -->
         <div class="flex gap-4">
           <img
             src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"
@@ -127,7 +125,6 @@
           </div>
         </div>
 
-        <!-- HF PEFT -->
         <div class="flex gap-4">
           <img
             src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"
@@ -144,7 +141,42 @@
           </div>
         </div>
       </div>
-    </section>
+    </section> -->
+
+    <section class="mt-8">
+  <h2 class="text-2xl font-semibold mb-6">Open Source Contributions</h2>
+
+  <ul class="list-none space-y-4">
+
+    <a href="https://github.com/camel-ai/camel" target="_blank" class="block">
+      <li class="flex justify-between items-center hover:underline underline-offset-4 py-2">
+        <span class="text-gray-500 w-40">Camel-AI</span>
+        <span class="flex-1 font-mono text-sm">
+          Core contributor focused on model providers, toolkits, and other features. Regularly review PRs and help shape design decisions.
+        </span>
+      </li>
+    </a>
+
+    <a href="https://github.com/UKPLab/sentence-transformers" target="_blank" class="block">
+      <li class="flex justify-between items-center hover:underline underline-offset-4 py-2">
+        <span class="text-gray-500 w-40">Sentence Transformers</span>
+        <span class="flex-1 font-mono text-sm">
+          Added MCC metric for evaluation, expanded test coverage, and fixed several edge case bugs.
+        </span>
+      </li>
+    </a>
+
+    <a href="https://github.com/huggingface/peft" target="_blank" class="block">
+      <li class="flex justify-between items-center hover:underline underline-offset-4 py-2">
+        <span class="text-gray-500 w-40">HuggingFace Peft</span>
+        <span class="flex-1 font-mono text-sm">
+          Implemented the exclude_modules parameter in LoRAConfig, improving fine-tuning control for large models.
+        </span>
+      </li>
+    </a>
+
+  </ul>
+</section>
 
     <script>
       lucide.createIcons();
