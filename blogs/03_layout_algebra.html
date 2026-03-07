@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Layout Algebra in NVIDIA CuTe</title>
+
+    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body);"></script>
+
+    <script
+      async
+      src="https://www.googletagmanager.com/gtag/js?id=G-4VP1VKLPKJ"
+    ></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag() { dataLayer.push(arguments); }
+      gtag("js", new Date());
+      gtag("config", "G-4VP1VKLPKJ");
+    </script>
+  </head>
+
+  <body class="bg-orange-50 text-gray-900 w-full max-w-3xl mx-auto px-5 md:px-0 pb-20">
+    <nav class="flex justify-between items-center py-6 border-b border-gray-300">
+      <h1 class="font-serif text-3xl font-bold">Jino Rohit</h1>
+      <div class="flex gap-6 text-sm">
+        <a href="../index.html" class="hover:text-orange-600 transition">Home</a>
+        <a href="./blog.html" class="hover:text-orange-600 transition">Blogs</a>
+        <a href="../projects/projects.html" class="hover:text-orange-600 transition">Projects</a>
+      </div>
+    </nav>
+
+    <header class="mt-12">
+      <h1 class="font-serif text-4xl font-bold leading-tight text-gray-950">
+        Layout Algebra in NVIDIA CuTe
+      </h1>
+      <p class="text-sm text-gray-600 mt-4 italic">February 22, 2026 • 15 min read</p>
+    </header>
+
+    <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
+  
+  <section class="space-y-4">
+    <p>
+      Layout algebra forms the heart of layouts by allowing developers to combine layouts in different ways.
+    </p>
+
+    <p>
+      I highly recommend reading my previous blog on
+      <a href="./02_layout_primer.html" class="text-orange-600 hover:text-orange-700 underline transition">layout primer</a>
+      before moving onto this section.
+    </p>
+
+  </section>
+
+  <section class="space-y-4">
+    <h2 class="text-2xl font-serif font-bold text-gray-950">
+      Basic Terms to Know
+    </h2>
+
+    <!-- <ul>
+        1. mode(Layout) - the number of dimensions in the Layout . eg:
+      1. rank(Layout) - the number of modes in a Layout. Equivalent to the tuple size of the Layout’s shape.
+
+    2. depth(Layout): The depth of the Layout’s shape. A single integer has depth 0, a tuple of integers has depth 1, a tuple of tuples of integers has depth 2, etc.
+
+    3. shape(Layout): The shape of the Layout.
+
+    4. stride(Layout): The stride of the Layout.
+
+    5. size(Layout): The size of the Layout function’s domain. Equivalent to size(shape(Layout)).
+
+    6. cosize(Layout): The size of the Layout function’s codomain (not necessarily the range). Equivalent to A(size(A) - 1) + 1.
+
+    For 4:1 mapping to [0,1,2,3]:
+
+    cosize = 4 (spans addresses 0 through 3)
+
+    For 4:2 mapping to [0,2,4,6]:
+
+    cosize = 7 (spans addresses 0 through 6, even though we only use 4 of them)
+
+    For (2,3):(1,4) mapping to [0,1,4,5,8,9]:
+
+    cosize = 10 (spans addresses 0 through 9)
+
+    7. codomain: set of all memory addresses that layout produces.
+
+    for 4:2: codomain = {0, 2, 4, 6}
+    </ul> -->
+
+    <p>
+        <strong>1. rank (Layout)</strong> - the number of top level modes (dimensions) in the
+          layout, equivalent to the tuple size of the shape. Think of it as how many indices you
+          need to address a single element.
+        </p>
+        <pre class="p-4 text-sm overflow-x-auto"><code>
+            Shape (2,3) has two modes: rank 2
+            A flat shape (6) has one mode: rank 1</code>
+        </pre>
+
+        <p>
+          <strong>2. depth (Layout)</strong> - how deeply nested the shape tuple is. A plain
+          integer has depth 0, a flat tuple like <code>(2,3)</code> has depth 1, and a
+          tuple-of-tuples like <code>((2,4),3)</code> has depth 2.
+        </p>
+
+        <p>
+          <strong>3. shape (Layout)</strong> - returns the shape of the layout.
+        </p>
+        <p>
+          <strong>4. stride (Layout)</strong> - returns the stride of the layout pair.
+        </p>
+
+        <img src="artifacts/stride.png" class="mx-auto my-4" />
+
+        <p>
+          <strong>5. size (Layout)</strong> - the total number of logical elements, i.e. the
+          product of all shape values.
+        </p>
+        <pre class="rounded p-4 text-sm overflow-x-auto"><code>
+            auto A = make_layout(make_shape(2,3), make_stride(1,4));
+            size(A);  // 6  (= 2 x 3)
+
+            auto B = make_layout(make_shape(4), make_stride(2));
+            size(B);  // 4  (four elements, even though stride skips addresses)</code>
+        </pre>
+
+        <p>
+          <strong>6. cosize(Layout)</strong> - the span of memory addresses the layout touches,
+          defined as the largest offset produced plus one:
+        </p>
+        $$\text{cosize}(A) = A(\text{size}(A) - 1) + 1$$
+        
+        <div class="overflow-x-auto">
+          <table class="text-sm w-full border-collapse border border-gray-300">
+            <thead>
+              <tr class="bg-gray-100">
+                <th class="border border-gray-300 px-4 py-2 text-left font-mono">Layout</th>
+                <th class="border border-gray-300 px-4 py-2 text-left font-mono">Offsets produced</th>
+                <th class="border border-gray-300 px-4 py-2 text-left font-mono">size</th>
+                <th class="border border-gray-300 px-4 py-2 text-left font-mono">cosize</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="border border-gray-300 px-4 py-2 font-mono">4:1</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">0, 1, 2, 3</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">4</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">4</td>
+              </tr>
+              <tr>
+                <td class="border border-gray-300 px-4 py-2 font-mono">4:2</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">0, 2, 4, 6</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">4</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">7</td>
+              </tr>
+              <tr>
+                <td class="border border-gray-300 px-4 py-2 font-mono">(2,3):(1,4)</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">0, 1, 4, 5, 8, 9</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">6</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">10</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          For <code>4:2</code>: elements land at addresses 0, 2, 4, 6. The last address is 6,
+          so cosize = 6 + 1 = <strong>7</strong>. You need a buffer of at least 7 slots even
+          though only 4 are used — stride-2 leaves gaps at addresses 1, 3, and 5.
+        </p>
+
+        <p>
+          <strong>7. codomain</strong> - the <em>set</em> of all memory addresses the layout
+          actually produces(equivalent to physical memory). Gaps within the span are NOT part of the codomain.
+        </p>
+
+        <div class="overflow-x-auto">
+          <table class="text-sm w-full border-collapse border border-gray-300">
+            <thead>
+              <tr class="bg-gray-100">
+                <th class="border border-gray-300 px-4 py-2 text-left font-mono">Layout</th>
+                <th class="border border-gray-300 px-4 py-2 text-left font-mono">codomain</th>
+                <th class="border border-gray-300 px-4 py-2 text-left font-mono">cosize</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="border border-gray-300 px-4 py-2 font-mono">4:1</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">{0, 1, 2, 3}</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">4</td>
+              </tr>
+              <tr>
+                <td class="border border-gray-300 px-4 py-2 font-mono">4:2</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">{0, 2, 4, 6}</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">7</td>
+              </tr>
+              <tr>
+                <td class="border border-gray-300 px-4 py-2 font-mono">(2,3):(1,4)</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">{0, 1, 4, 5, 8, 9}</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">10</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          For <code>(2,3):(1,4)</code>, addresses 2, 3, 6, 7 fall within the cosize span of 10
+          but are never touched - they are outside the codomain.
+        </p>
+
+   </section>
+
+   <section class="space-y-4">
+    <h2 class="text-2xl font-serif font-bold text-gray-950">
+      Indexing
+    </h2>
+
+    <p>Now that we more or less, visually have an understanding of layouts, the first thing you want to to try is to index into them, which is pretty easy!</p>
+
+    <p>do you remember the offset formula we used in the last blog: </p>
+    <pre class="text-black-300 text-sm rounded p-4 overflow-x-auto font-mono">
+            offset(row, col) = row × s_row + col × s_col</pre>
+
+    <p>We can adapt it to the nested case also</p>
+    <pre class="text-black-300 text-sm rounded p-4 overflow-x-auto font-mono">
+            offset(row, (col1, col2)) = row × s_row + col1 × s_col1 + col2 × s_col2 </pre>
+
+    <img src="artifacts/indexing.png" class="mx-auto my-4" />
+
+    <p> Here's some code you can try out</p>
+
+    <pre class="p-4 text-sm overflow-x-auto"><code>
+      auto layout = make_layout(
+          make_shape (4,  make_shape (2, 4)),
+          make_stride(2,  make_stride(1, 8))
+      );
+
+      auto idx = make_coord(2, make_coord(0, 1));
+      int val = layout(idx);
+
+      printf("layout(2, (0,1)) = %d\n", val);  // expect 12
+      </code>
+    </pre>
+
+    <section class="space-y-4">
+    <h2 class="text-2xl font-serif font-bold text-gray-950">
+      Slicing
+    </h2>
+
+    <p> We can also slice more than a single coordinate, say a whole row, the second column etc.</p>
+    <p> In python we have the ":" , CuTe provids us with the "_". Let's try to index the whole of first row</p>
+
+    <img src="artifacts/slicing.png" class="mx-auto my-4" />
+
+    <p> Here's some code you can try out</p>
+
+    <pre class="p-4 text-sm overflow-x-auto"><code>
+      auto layout = make_layout(
+        make_shape (4,  make_shape (2, 4)),
+        make_stride(2,  make_stride(1, 8))
+    );
+
+    auto coord = make_coord(0, make_coord(_, _));
+    auto out = slice(coord, layout);
+    print_layout(layout);
+    print_layout(out);
+      </code>
+    </pre>
+
+
+   <section class="space-y-4">
+    <h2 class="text-2xl font-serif font-bold text-gray-950">
+      Coalescing
+    </h2>
+
+    <p>
+      Coalesce is a simplify operation on layouts. It reduces the number of modes (dimensions) in a layout without changing the underlying mapping from integers to integers.
+    </p>
+
+    <h2 class="text-2xl font-serif font-bold text-gray-950">
+      Conditions met in coalecing
+    </h2>
+
+    <ul class="list-disc pl-6 space-y-2 text-gray-700">
+      <li><code>@post size(result) == size(layout)</code>  
+      - result has the same number of elements as the input layout</li>
+      <li><code>@post depth(result) <= 1</code>  
+      - the result layout is always flattened to depth ≤ 1</li>
+      <li><code>@post ∀ i ∈ [0, size(layout)), result(i) == layout(i)</code>  
+        - the indices used to access the elements remains unchanged</li>
+    </ul>
+
+    <h2 class="mt-10 text-2xl font-bold text-gray-900">
+      The four cases of coalescing
+    </h2>
+
+   <div class="overflow-x-auto">
+      <table class="text-sm w-full border-collapse border border-gray-300">
+        <thead>
+          <tr class="bg-gray-100">
+            <th class="border border-gray-300 px-4 py-2 text-left font-mono">Case</th>
+            <th class="border border-gray-300 px-4 py-2 text-left font-mono">Condition</th>
+            <th class="border border-gray-300 px-4 py-2 text-left font-mono">Result</th>
+            <th class="border border-gray-300 px-4 py-2 text-left font-mono">Explanation</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="border border-gray-300 px-4 py-2 font-mono">1</td>
+            <td class="border border-gray-300 px-4 py-2 font-mono">s₀:d₀ ++ _1:d₁</td>
+            <td class="border border-gray-300 px-4 py-2 font-mono">s₀:d₀</td>
+            <td class="border border-gray-300 px-4 py-2">no change for the modes with static size 1</td>
+          </tr>
+          <tr>
+            <td class="border border-gray-300 px-4 py-2 font-mono">2</td>
+            <td class="border border-gray-300 px-4 py-2 font-mono">_1:d₀ ++ s₁:d₁</td>
+            <td class="border border-gray-300 px-4 py-2 font-mono">s₁:d₁</td>
+            <td class="border border-gray-300 px-4 py-2">no change for the modes with static size 1</td>
+          </tr>
+          <tr>
+            <td class="border border-gray-300 px-4 py-2 font-mono">3</td>
+            <td class="border border-gray-300 px-4 py-2 font-mono">s₀:d₀ ++ s₁:(s₀×d₀)</td>
+            <td class="border border-gray-300 px-4 py-2 font-mono">(s₀×s₁):d₀</td>
+            <td class="border border-gray-300 px-4 py-2">
+              if the second mode's stride is the product of the first mode's size and stride, then they can be combined.
+            </td>
+          </tr>
+          <tr>
+            <td class="border border-gray-300 px-4 py-2 font-mono">4</td>
+            <td class="border border-gray-300 px-4 py-2 font-mono">Otherwise</td>
+            <td class="border border-gray-300 px-4 py-2 font-mono">(s₀,s₁):(d₀,d₁)</td>
+            <td class="border border-gray-300 px-4 py-2">else keep as separate dimensions</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 class="mt-10 text-2xl font-bold text-gray-900">
+      Let's work this out
+    </h2>
+
+    <p class="font-medium">Input layout:</p>
+    <img src="artifacts/coalesce_example.png" class="mx-auto my-4" />
+
+    <p class="mt-4">Coalescing steps:</p>
+    <img src="artifacts/solve_coalesce.png" class="mx-auto my-4" />
+
+    <p> The final coalesced layout is (_12, _1).</p>
+    </section>
+
+    <section class="space-y-4">
+    <h2 class="text-2xl font-serif font-bold text-gray-950">
+      Division
+    </h2>
+
+    <p>In regular number field when we do division, it means how many equal parts can we divide the numerator into: example 20/10 = 2 equal parts</p>
+    <p>Layout division means something different here, it is a hierarchy division, basically how can you divide them into tiles within the layout</p>
+
+    <p>Let's divide the layout (4,6) : (6,1) by a 2 x 2 tile. </p>
+
+    <img src="artifacts/divide.png" class="mx-auto my-4" />
+
+    </section>
+
+
+</article>
+
+
+    <script>
+      lucide.createIcons();
+    </script>
+  </body>
+</html>
