@@ -38,7 +38,7 @@
       <h1 class="font-serif text-4xl font-bold leading-tight text-gray-950">
         Layout Algebra in NVIDIA CuTe
       </h1>
-      <p class="text-sm text-gray-600 mt-4 italic">February 22, 2026 • 15 min read</p>
+      <p class="text-sm text-gray-600 mt-4 italic">March 07, 2026 • 15 min read</p>
     </header>
 
     <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
@@ -60,37 +60,6 @@
     <h2 class="text-2xl font-serif font-bold text-gray-950">
       Basic Terms to Know
     </h2>
-
-    <!-- <ul>
-        1. mode(Layout) - the number of dimensions in the Layout . eg:
-      1. rank(Layout) - the number of modes in a Layout. Equivalent to the tuple size of the Layout’s shape.
-
-    2. depth(Layout): The depth of the Layout’s shape. A single integer has depth 0, a tuple of integers has depth 1, a tuple of tuples of integers has depth 2, etc.
-
-    3. shape(Layout): The shape of the Layout.
-
-    4. stride(Layout): The stride of the Layout.
-
-    5. size(Layout): The size of the Layout function’s domain. Equivalent to size(shape(Layout)).
-
-    6. cosize(Layout): The size of the Layout function’s codomain (not necessarily the range). Equivalent to A(size(A) - 1) + 1.
-
-    For 4:1 mapping to [0,1,2,3]:
-
-    cosize = 4 (spans addresses 0 through 3)
-
-    For 4:2 mapping to [0,2,4,6]:
-
-    cosize = 7 (spans addresses 0 through 6, even though we only use 4 of them)
-
-    For (2,3):(1,4) mapping to [0,1,4,5,8,9]:
-
-    cosize = 10 (spans addresses 0 through 9)
-
-    7. codomain: set of all memory addresses that layout produces.
-
-    for 4:2: codomain = {0, 2, 4, 6}
-    </ul> -->
 
     <p>
         <strong>1. rank (Layout)</strong> - the number of top level modes (dimensions) in the
