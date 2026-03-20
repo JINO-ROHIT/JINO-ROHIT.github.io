@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Warped Matrix Multiply Accumulate(WMMA) in CUDA</title>
+    <title>Warp Matrix Multiply Accumulate (WMMA) in CUDA</title>
 
     <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
@@ -12,16 +12,34 @@
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body);"></script>
 
-    <script
-      async
-      src="https://www.googletagmanager.com/gtag/js?id=G-4VP1VKLPKJ"
-    ></script>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-4VP1VKLPKJ"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
       function gtag() { dataLayer.push(arguments); }
       gtag("js", new Date());
       gtag("config", "G-4VP1VKLPKJ");
     </script>
+
+    <style>
+      pre {
+        background: #1e1e1e;
+        color: #d4d4d4;
+        padding: 1.25rem;
+        border-radius: 0.5rem;
+        overflow-x: auto;
+        font-size: 0.9rem;
+        line-height: 1.6;
+      }
+      code {
+        font-family: 'Fira Code', 'Consolas', monospace;
+      }
+      .inline-code {
+        background: #f3f4f6;
+        padding: 0.125rem 0.375rem;
+        border-radius: 0.25rem;
+        font-size: 0.875rem;
+      }
+    </style>
   </head>
 
   <body class="bg-orange-50 text-gray-900 w-full max-w-3xl mx-auto px-5 md:px-0 pb-20">
@@ -35,56 +53,244 @@
     </nav>
 
     <header class="mt-12">
-      <h1 class="font-serif text-4xl font-bold leading-tight text-gray-950">
-        Warped Matrix Multiply Accumulate(WMMA) in CUDA
+      <h1 class="font-serif text-4xl md:text-5xl font-bold leading-tight text-gray-950">
+        Warp Matrix Multiply Accumulate (WMMA) in CUDA
       </h1>
-      <p class="text-sm text-gray-600 mt-4 italic">March 19, 2026 • 20 min read</p>
+      <p class="text-sm text-gray-600 mt-4">March 19, 2026 • 10 min read</p>
     </header>
 
-    <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
-  
-  <section class="space-y-4">
-    <p>
-      This blog will help you understand what tensor cores are and how to get programming with them in CUDA.
-    </p>
+    <article class="mt-10 space-y-12 text-lg text-gray-800 leading-relaxed font-serif">
+      
+      <section class="space-y-4">
+        <p class="text-xl text-gray-700">
+          This article will take you through Tensor Cores and how to use CUDA's WMMA API for high-performance matrix operations.
+        </p>
+      </section>
+
+      <hr class="border-gray-300">
+
+      <section class="space-y-4">
+        <h2 class="text-3xl font-bold text-gray-950">What Are Tensor Cores?</h2>
+        
+        <p>
+          Introduced in NVIDIA's Volta architecture, <strong>Tensor Cores</strong> are specialized hardware units designed for 
+          performing matrix multiplication and accumulation operations extremely fast. 
+          They multiply two half precision(fp16) matrices and then accumulate then in an fp16/fp32 matrix.
+        </p>
+
+        <img src="artifacts/fp16.png" class="mx-auto my-6"/>
+
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-3xl font-bold text-gray-950">How CUDA Cores vs Tensor Cores Work</h2>
+
+        <h3 class="text-xl font-semibold text-gray-800">CUDA Cores: Element by Element</h3>
+        <p>
+          A CUDA core executes one instruction on one piece of data per clock cycle. When you compute <code class="inline-code">c = a * b + c</code>, 
+          it's a fused multiply-add (FMA) on a single number.
+        </p>
+        <p>
+          To add two vectors of size 32, you need 32 CUDA cores working in parallel - each adding one pair of elements simultaneously.
+        </p>
+
+        <h3 class="text-xl font-semibold text-gray-800 mt-6">Tensor Cores: Whole Matrix at Once</h3>
+        <p>
+          Tensor cores are built for <strong>matrix multiply-accumulate</strong>: \( D = A \times B + C \), 
+          where A, B, C, and D are matrices.
+        </p>
+        <p>
+          A single tensor core can multiply a 4×4 matrix with another 4×4 matrix in one cycle - that's 64 FMA operations!
+        </p>
+
+        <img src="artifacts/tensor_cores.png" class="mx-auto my-6" alt="Tensor cores diagram" />
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-3xl font-bold text-gray-950">Introducing the WMMA API</h2>
+
+        <p>
+          CUDA 9.0 introduced the <strong>WMMA (Warp-level Matrix Multiply and Accumulate)</strong> API, 
+          giving developers direct access to tensor cores from CUDA code.
+        </p>
+
+        <p>
+          The WMMA API lets you perform \( D = A \times B + C \) at the <em>warp level</em>. 
+          A warp is a group of 32 threads, and together they cooperatively compute one matrix tile.
+        </p>
 
 
-  </section>
+        <h3 class="text-xl font-semibold text-gray-800 mt-6">Supported Matrix Sizes</h3>
+        <p>Each warp can handle only specific tile sizes. The most common tile size is 16 x 16 x 16. Other supported sizes include:</p>
+        <ul class="list-disc list-inside space-y-1 ml-4">
+          <li>8 x 8 x 16</li>
+          <li>16 x 8 x 16</li>
+          <li>8 x 16 x 16</li>
+          <li>32 x 8 x 16</li>
+          <li>8 x 32 x 16</li>
+        </ul>
+        <p class="mt-2">
+          For the full list, see the 
+          <a href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#element-types-and-matrix-sizes" class="text-orange-600 hover:underline" target="_blank">CUDA Programming Guide</a>.
+        </p>
+      </section>
 
-  <section class="space-y-4">
-    <h2 class="text-2xl font-serif font-bold text-gray-950">
-      Tensor Cores
-    </h2>
+      <section class="space-y-4">
+        <h2 class="text-3xl font-bold text-gray-950">Deep Dive into the API</h2>
 
-    <p>
-    First introduced in the Volta architecture, tensor cores are computational units that specialize in performing matrix multiplication and accumulation in mixed
-    precision. They multiply two half precision(fp16) matrices and then accumulate then in an fp16/fp32 matrix.
-    </p>
+        <p>
+          The <code class="inline-code">fragment</code> class is a warp-level storage container that holds matrix tiles 
+          across all 32 threads in a warp.
+        </p>
 
-    <img src="artifacts/fp16.png" class="mx-auto my-4" />
+        <pre><code>template&lt;typename matrix, int m, int n, int k, typename T, typename Layout&gt;
+class fragment;</code></pre>
 
-    <p>CUDA cores are designed to execute a single instruction on a single piece of data per clock cycle. So when you do a c = a * b +c, the CUDA core will
-        use a FMA(fused multiply add) operation on a single number. So when you try to add two vectors of say size 32, there are 32 CUDA cores each adding one 
-        pair of elements in parallel.
-    </p>
+        <p class="mt-4">Let's break down each template parameter:</p>
 
-    <p>Nice, what about Tensor cores? These units are specialized for matrix multiply accumulate, for instance D = A * B + C, but here A, B, C are matrices and
-        not single numbers. That means, if we multiply matrix  of size 4 x 4 with another matrix of 4 x 4, thats (4 x 4 x 4) = 64 multiply add operations in one cycle!
-    </p>
+        <table class="w-full text-left border-collapse mt-4">
+          <thead>
+            <tr class="bg-gray-100">
+              <th class="border border-gray-300 px-4 py-2">Parameter</th>
+              <th class="border border-gray-300 px-4 py-2">Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="border border-gray-300 px-4 py-2"><code class="inline-code">matrix</code></td>
+              <td class="border border-gray-300 px-4 py-2">Which matrix: <code>wmma::matrix_a</code>, <code>wmma::matrix_b</code>, or <code>wmma::accumulator</code></td>
+            </tr>
+            <tr>
+              <td class="border border-gray-300 px-4 py-2"><code class="inline-code">m, n, k</code></td>
+              <td class="border border-gray-300 px-4 py-2">Tile dimensions (e.g., 16, 16, 16)</td>
+            </tr>
+            <tr>
+              <td class="border border-gray-300 px-4 py-2"><code class="inline-code">T</code></td>
+              <td class="border border-gray-300 px-4 py-2">Data type: <code>half</code> (fp16), <code>float</code>, etc.</td>
+            </tr>
+            <tr>
+              <td class="border border-gray-300 px-4 py-2"><code class="inline-code">Layout</code></td>
+              <td class="border border-gray-300 px-4 py-2">Memory layout: <code>wmma::row_major</code> or <code>wmma::col_major</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
 
-    <img src="artifacts/tensor_cores.png" class="mx-auto my-4" />
+      <section class="space-y-4">
+        <h2 class="text-3xl font-bold text-gray-950">The Three Core Functions</h2>
+
+        <h3 class="text-xl font-semibold text-gray-800">1. Loading Data: <code class="inline-code">load_matrix_sync</code></h3>
+        <pre><code>void load_matrix_sync(fragment, data_ptr, elements);</code></pre>
+
+        <p>Load a matrix tile from global or shared memory into a fragment. If you donot load the correct matrix tile sizes, it will result in an error.</p>
+
+        <table class="w-full text-left border-collapse mt-4">
+          <thead>
+            <tr class="bg-gray-100">
+              <th class="border border-gray-300 px-4 py-2">Parameter</th>
+              <th class="border border-gray-300 px-4 py-2">Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="border border-gray-300 px-4 py-2"><code class="inline-code">fragment</code></td>
+              <td class="border border-gray-300 px-4 py-2">the fragment class to load the tile</td>
+            </tr>
+            <tr>
+              <td class="border border-gray-300 px-4 py-2"><code class="inline-code">data_ptr</code></td>
+              <td class="border border-gray-300 px-4 py-2">pointer to the first element of the matrix we want to load</td>
+            </tr>
+            <tr>
+              <td class="border border-gray-300 px-4 py-2"><code class="inline-code">elements</code></td>
+              <td class="border border-gray-300 px-4 py-2">number of elements per row/column</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <pre><code>#include &lt;mma.h&gt;
+using namespace nvcuda;
+
+__global__ void wmma_kernel(half *a, half *b, float *c) {
+    wmma::fragment&lt;wmma::matrix_a, 16, 16, 16, half, wmma::row_major&gt; frag_a;
+    wmma::fragment&lt;wmma::matrix_b, 16, 16, 16, half, wmma::col_major&gt; frag_b;
+    wmma::fragment&lt;wmma::accumulator, 16, 16, 16, float&gt; frag_c;
+
+    // Load from global memory (use __syncthreads() if loading from shared memory)
+    wmma::load_matrix_sync(frag_a, a, 16);
+    wmma::load_matrix_sync(frag_b, b, 16);
+    wmma::load_matrix_sync(frag_c, c, 16);
+}</code></pre>
+
+        <h3 class="text-xl font-semibold text-gray-800 mt-8">2. Perform MMA <code class="inline-code">mma_sync</code></h3>
+        <p>Perform the actual matrix multiplication using tensor cores.</p>
+        <pre><code>// Perform the matrix multiply-accumulate: D = A * B + C
+wmma::mma_sync(frag_c, frag_a, frag_b, frag_c);</code></pre>
+
+          <p class="mt-1">The last <code class="inline-code">frag_c</code> is both input (initial value to add) and output (result).</p>
+
+        <h3 class="text-xl font-semibold text-gray-800 mt-8">3. Storing Results: <code class="inline-code">store_matrix_sync</code></h3>
+        <p>Write the computed fragment back to memory.</p>
+        <pre><code>// Store result back to global memory
+wmma::store_matrix_sync(c, frag_c, 16, wmma::mem_row_major);
+</code></pre>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-3xl font-bold text-gray-950">Complete Example</h2>
+        <p>Here's a full working example of WMMA for 16×16 matrix multiplication:</p>
+        <pre><code>__global__ void wmma_matmul(
+    const __half* __restrict__ A,   
+    const __half* __restrict__ B,  
+    float* __restrict__ C, 
+    int m, int n, int k
+){
+    // 256 threads divided into 8 warps laid out as 
+    // 4 rows and 2 cols
+    const int warp_id = threadIdx.x / WARP_SIZE;
+    const int warp_row = warp_id / WARPS_X;
+    const int warp_col = warp_id % WARPS_X;
+
+    // where should the output be in the C matrix
+    const int cRow = blockIdx.y * BLOCK_TILE_M + warp_row * WMMA_M;
+    const int cCol = blockIdx.x * BLOCK_TILE_N + warp_col * WMMA_N;
+
+    if (cRow >= m || cCol >= n) return;
+
+    wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, __half, wmma::row_major> aFrag;
+    wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, __half, wmma::row_major> bFrag;
+    wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> accFrag;
+
+    wmma::fill_fragment(accFrag, 0.0f);
+
+    for(int kiter = 0; kiter < K; kiter += WMMA_K){
+        const int aRow = cRow,   aCol = kiter;
+        const int bRow = kiter,  bCol = cCol;
+
+        if (aRow < m && aCol < k && bRow < k && bCol < n)
+        {
+            wmma::load_matrix_sync(aFrag, A + aRow * k + aCol, k);
+            wmma::load_matrix_sync(bFrag, B + bRow * n + bCol, n);
+
+            wmma::mma_sync(accFrag, aFrag, bFrag, accFrag);
+        }
+    }
+    wmma::store_matrix_sync(C + cRow * n + cCol, accFrag, n, wmma::mem_row_major);
+}</code></pre>
+      </section>
 
 
+      <section class="space-y-4">
+        The WMMA API was designed to make it easy for developers to make use of tensor cores in CUDA. If you want more fine grained control and can write some
+        assembly, you can use the PTX MMA instruction to directly access the underlying hardware. Usually this offers more performance but requires more skill
+        from the developer.
+      </section>
 
-   </section>
+    </article>
 
-   <section class="space-y-4">
-    <h2 class="text-2xl font-serif font-bold text-gray-950">
-    </h2>
-    </section>
+    <footer class="mt-16 pt-8 border-t border-gray-300 text-center text-gray-600">
+      <p>All code can be found here <a href="https://github.com/JINO-ROHIT/kernels" class="text-orange-600 hover:underline">GitHub</a>.</p>
+    </footer>
 
-
-</article>
     <script>
       lucide.createIcons();
     </script>
