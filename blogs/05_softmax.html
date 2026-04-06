@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Flash Attention Series 01- Mastering Softmax</title>
+
+    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body);"></script>
+
+    <script
+      async
+      src="https://www.googletagmanager.com/gtag/js?id=G-4VP1VKLPKJ"
+    ></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag() { dataLayer.push(arguments); }
+      gtag("js", new Date());
+      gtag("config", "G-4VP1VKLPKJ");
+    </script>
+  </head>
+
+  <body class="bg-orange-50 text-gray-900 w-full max-w-3xl mx-auto px-5 md:px-0 pb-20">
+    <nav class="flex justify-between items-center py-6 border-b border-gray-300">
+      <h1 class="font-serif text-3xl font-bold">Jino Rohit</h1>
+      <div class="flex gap-6 text-sm">
+        <a href="../index.html" class="hover:text-orange-600 transition">Home</a>
+        <a href="./blog.html" class="hover:text-orange-600 transition">Blogs</a>
+        <a href="../projects/projects.html" class="hover:text-orange-600 transition">Projects</a>
+      </div>
+    </nav>
+
+    <header class="mt-12">
+      <h1 class="font-serif text-4xl font-bold leading-tight text-gray-950">
+        Flash Attention Series - Mastering Softmax
+      </h1>
+      <p class="text-sm text-gray-600 mt-4 italic">April 06, 2026 • 10 min read</p>
+    </header>
+
+    <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
+  
+  <section class="space-y-4">
+    <p>
+      Flash attention is currently one of the most important mainstream attention algorithm. Online softmax sits at the heart of the algorithm and understanding
+      this will allow you to understand flash attention more smoothly.
+    </p>
+
+    <p>
+      Pytorch defines softmax as a function that is applied on a tensor of N dimension such that the output tensor is squished between [0, 1] and all the elements
+      sum together to 1.
+    </p>
+
+    <div class="py-4 text-center text-2xl">
+      $$ \mathrm{softmax}(x_i) = \frac{e^{x_i}}{\sum_{j=1}^{n} e^{x_j}} $$
+    </div>
+
+    <p>
+      In this post, I'll walk through 4 variations of softmax, a naive version, safe softmax, online softmax and blocked softmax.
+    </p>
+  </section>
+
+  <section class="space-y-4">
+    <h2 class="text-2xl font-serif font-bold text-gray-950">
+      Naive Softmax
+    </h2>
+
+    <p>
+      Well, if you had to guess just by looking at the formula, what would be the 3 major steps you need to compute softmax?
+      1. Numerator is simply the exponential of each element in the tensor.
+      2. Denominator is the sum of all of the exponential of each element in the tensor, or more simply the sum of numerator.
+      3. we then divide the numerator by the denominator.
+      
+      how easy, lets implement this now without invoking the functional softmax and do it by hand.
+    </p>
+
+    <pre class="bg-gray-900 text-gray-100 p-5 rounded-lg overflow-x-auto text-sm font-mono"><code>
+    x = torch.tensor([0.2, 0.5, 0.1, -0.5, -0.4])
+    
+    # step 1. we take the sum of exp of x
+    num = torch.exp(x)
+
+    # step 2. we take the sum of exp of x
+    denom = torch.sum(torch.exp(x))
+
+    # step 3. we divide num/denom
+    result = num/denom
+    print(result)
+    </code></pre>
+  </section>
+
+  <section class="space-y-4 font-serif">
+    <h2 class="text-2xl font-serif font-bold text-gray-950">
+      Safe Softmax
+    </h2>
+
+    <p>
+      Ow, but we forgot something, try and plug in a ridiculously large number in the tensor and take the exp of it. 
+    </p>
+
+    <pre class="bg-gray-900 text-gray-100 p-5 rounded-lg overflow-x-auto text-sm font-mono"><code>
+    print(torch.exp(torch.tensor(100)))
+    </code></pre>
+
+    <p>
+      This gives you an infinity.
+    </p>
+
+    <p class="mt-2">
+      But remember for the softmax, we wont be having just a single number, we will be having multiple numbers in the tensor
+    </p>
+
+    <p>
+      What if we subtract the maximum of the entire tensor across each element of the tensor and then do softmax, the math indeed works out because [explain]. 
+    </p>
+
+    <p> The formula would look something like this</p>
+
+    <div class="py-4 text-center text-2xl">
+      $$ $$
+    </div>
+
+    <pre class="bg-gray-900 text-gray-100 p-5 rounded-lg overflow-x-auto text-sm font-mono"><code>
+    x = torch.tensor([0.2, 0.5, 0.1, -0.5, -0.4, 100])
+    
+    largest = torch.max(x)
+
+    # subtract the largest from each value
+    normalized_x = x - largest
+
+    # do the same as before
+
+    num = torch.exp(normalized_x)
+    denom = torch.sum(torch.exp(normalized_x))
+    result = num/denom
+    print(result)
+    </code></pre>
+
+  </section>
+
+  <section class="space-y-4 font-serif">
+    <h2 class="text-2xl font-serif font-bold text-gray-950">
+      Online Softmax
+    </h2>
+
+    <p>Now that we understand softmax, we need to think deeply about two things -</p>
+    <p> 1. we will be doing softmax in the gpu, so what happens if our tensor is like super long, so long that it doesnt fit into memory? 
+        2. currently we need 3 passes, thats a lot of read and write to and from the HBM, can we make this faster?
+    </p>
+
+    <p>Well, we could probably break it up, but we need to keep a track of the maximum and also the denominator as well, how can we do this? </p>
+
+    <p> Online softmax solves exactly this problem. Lets try to work this out step by step</p>
+
+    <pre class="bg-gray-900 text-gray-100 p-5 rounded-lg overflow-x-auto text-sm font-mono"><code>
+    x = torch.tensor([0.2, 0.5, 0.1]) # lets take a small tensor for now
+    </code></pre>
+
+  </section>
+
+
+
+</article>
+
+
+    <script>
+      lucide.createIcons();
+    </script>
+  </body>
+</html>
