@@ -159,13 +159,12 @@ print(result)
 
         <p>Now that we understand softmax, we need to think deeply about two problems:</p>
         <ol class="list-decimal list-inside space-y-1 pl-2">
-          <li>We will be doing softmax on the GPU. What happens if our tensor is so long that it doesn't fit in SRAM?</li>
           <li>We currently need 3 passes - that's a lot of reads and writes to and from HBM. Can we reduce this to a single pass?</li>
         </ol>
 
         <p>
           Online softmax solves both. The key idea: we process elements one by one, maintaining a <strong>running max</strong> \(m\) and a <strong>running denominator</strong> \(d\). 
-          Whenever the running max updates, we <em>rescale</em> the old denominator to correct it.
+          Whenever the running max updates, we <em>rescale</em> the old denominator to correct it. (in a GPU, this happens on the SRAM where the number of cycles needed is extremely less compared to HBM)
         </p>
 
         <p>The recurrence at each step \(i\) is:</p>
@@ -334,7 +333,7 @@ print(f"sums to: {result.sum():.6f}")  # 1.0
         </p>
 
         <p>
-          In the next post, we'll use this foundation to build up the full Flash Attention algorithm!
+          In the next post, we'll look at tiling for matrix multiplication and then combine both to build up the full Flash Attention algorithm!
         </p>
       </section>
 
