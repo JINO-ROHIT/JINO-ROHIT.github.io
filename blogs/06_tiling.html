@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Flash Attention Series 02- Tiled Matrix Multiplication</title>
+
+    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body);"></script>
+
+  </head>
+
+  <body class="bg-orange-50 text-gray-900 w-full max-w-3xl mx-auto px-5 md:px-0 pb-20">
+    <nav class="flex justify-between items-center py-6 border-b border-gray-300">
+      <h1 class="font-serif text-3xl font-bold">Jino Rohit</h1>
+      <div class="flex gap-6 text-sm">
+        <a href="../index.html" class="hover:text-orange-600 transition">Home</a>
+        <a href="./blog.html" class="hover:text-orange-600 transition">Blogs</a>
+        <a href="../projects/projects.html" class="hover:text-orange-600 transition">Projects</a>
+      </div>
+    </nav>
+
+    <header class="mt-12">
+      <h1 class="font-serif text-4xl font-bold leading-tight text-gray-950">
+        Flash Attention Series 02- Tiled Matrix Multiplication
+      </h1>
+      <p class="text-sm text-gray-600 mt-4 italic">April 13, 2026 • 10 min read</p>
+    </header>
+
+    <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
+  
+      <section class="space-y-4">
+        <p>
+          This is part 2 of the three series blog on where we understand the smallest moving pieces of the flash attention paper and then put them together.
+        </p>
+
+        <p>
+          Before you continue , I would recommend to read this blog first on the variations of softmax - https://jino-rohit.github.io/blogs/05_softmax.html
+          and then this blog on matrix multiplication spelled out - https://jino-rohit.github.io/blogs/01_gemm.html
+
+          for getting started with CUDA, i recommend this series - https://github.com/Infatoshi/cuda-course 
+        </p>
+
+        <p>
+          In this post, We will learn to implement matrix multiplication and then a tiled variation of matrix mulplication CUDA C++.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Matrix Multiplication
+        </h2>
+
+        <p>
+          Well, just as a reminder, at its core, matrix mulplication computes each output element as a dot product:
+        </p>
+
+        <div class="py-4 text-center text-2xl">
+          $$ c_{ij} = \sum_{k=1}^{n} a_{ik} \cdot b_{kj} $$
+        </div>
+
+      </section>
+
+      <section class="space-y-4 font-serif">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Naive Matrix Multiplication
+        </h2>
+
+        <p>
+          In this implementation, we simply load the rows of matrix A and the columns of matrix B and compute a dot product over them.
+        </p>
+
+        <p>Lets take a look at this visually with a small matrix</p>
+
+        <img src="artifacts/matmul_step1.png" class="mx-auto my-4" />
+        <img src="artifacts/matmul_step2.png" class="mx-auto my-4" />
+        <img src="artifacts/matmul_step3.png" class="mx-auto my-4" />
+        <img src="artifacts/matmul_step4.png" class="mx-auto my-4" />
+
+        <pre class="bg-gray-900 text-gray-100 p-5 rounded-lg overflow-x-auto text-sm font-mono"><code>
+__global__ void matmul(float* A, float* B, float* C, const int M, const int K, const int N){
+    int t_row = blockIdx.y * blockDim.y + threadIdx.y;
+    int t_col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if(t_row < M && t_col < N){
+        float tmp = 0.0f;
+        for(int i = 0; i < K; i++){
+            tmp += A[t_row * K + i] * B[i * N + t_col];
+        }
+
+        C[t_row * N + t_col] = tmp;
+    }
+}
+        </code></pre>
+
+        <p>Whats going on in the kernel?</p>
+        <p> int t_row = blockIdx.y * blockDim.y + threadIdx.y;
+    int t_col = blockIdx.x * blockDim.x + threadIdx.x; these two lines first index into the rows and cols of the matrices appropriately</p>
+
+    <p> add more explanation</p>
+      </section>
+
+
+    </article>
+
+    <script>
+      lucide.createIcons();
+    </script>
+  </body>
+</html>
