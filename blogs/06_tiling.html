@@ -34,19 +34,20 @@
     <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
   
       <section class="space-y-4">
+        <section class="space-y-4">
         <p>
-          This is part 2 of the three series blog on where we understand the smallest moving pieces of the flash attention paper and then put them together.
+          This is part 2 of a three-part series where we understand the smallest moving pieces of the Flash Attention paper and then put them together into the full algorithm.
         </p>
-
         <p>
-          Before you continue , I would recommend to read this blog first on the variations of softmax - https://jino-rohit.github.io/blogs/05_softmax.html
-          and then this blog on matrix multiplication spelled out - https://jino-rohit.github.io/blogs/01_gemm.html
-
-          for getting started with CUDA, i recommend this series - https://github.com/Infatoshi/cuda-course 
+          Before continuing, I recommend reading the blog on
+          <a href="https://jino-rohit.github.io/blogs/01_gemm.html" class="text-orange-600 underline">GEMM in C++</a>.
         </p>
-
         <p>
-          In this post, We will learn to implement matrix multiplication and then a tiled variation of matrix mulplication CUDA C++.
+          For getting started with CUDA, I recommend
+          <a href="https://github.com/Infatoshi/cuda-course" class="text-orange-600 underline">this course</a>.
+        </p>
+        <p>
+          In this post we will implement matrix multiplication in CUDA C++ and then build a tiled variation that is significantly more faster by solving the issue of data movement.
         </p>
       </section>
 
@@ -71,7 +72,7 @@
         </h2>
 
         <p>
-          In this implementation, we simply load the rows of matrix A and the columns of matrix B and compute a dot product over them.
+          The simplest GPU implementation maps one thread to each output element \(C_{ij}\). That thread loads an entire row of <em>A</em> and an entire column of <em>B</em> from global memory, then accumulates their dot product.
         </p>
 
         <p>Lets take a look at this visually with a small matrix</p>
@@ -80,6 +81,8 @@
         <img src="artifacts/matmul_step2.png" class="mx-auto my-4" />
         <img src="artifacts/matmul_step3.png" class="mx-auto my-4" />
         <img src="artifacts/matmul_step4.png" class="mx-auto my-4" />
+
+        <p>This should look quite similar to the C++ version we wrote in the other blog.</p>
 
         <pre class="bg-gray-900 text-gray-100 p-5 rounded-lg overflow-x-auto text-sm font-mono"><code>
 __global__ void matmul(float* A, float* B, float* C, const int M, const int K, const int N){
@@ -97,11 +100,40 @@ __global__ void matmul(float* A, float* B, float* C, const int M, const int K, c
 }
         </code></pre>
 
-        <p>Whats going on in the kernel?</p>
-        <p> int t_row = blockIdx.y * blockDim.y + threadIdx.y;
-    int t_col = blockIdx.x * blockDim.x + threadIdx.x; these two lines first index into the rows and cols of the matrices appropriately</p>
+        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">What is going on in the kernel?</h3>
 
-    <p> add more explanation</p>
+        <p>
+          <strong>Thread indexing.</strong> Each thread computes exactly one output element. We use a 2D grid of 2D blocks, so the global row and column of the output element are:
+        </p>
+        <pre class="bg-gray-900 text-gray-100 p-5 rounded-lg overflow-x-auto text-sm font-mono"><code>int t_row = blockIdx.y * blockDim.y + threadIdx.y;
+int t_col = blockIdx.x * blockDim.x + threadIdx.x;</code></pre>
+        <p>
+          <code class="bg-gray-200 text-gray-800 px-1 rounded">blockIdx</code> tells us which block we are in, <code class="bg-gray-200 text-gray-800 px-1 rounded">blockDim</code> is the size of each block, and <code class="bg-gray-200 text-gray-800 px-1 rounded">threadIdx</code> is the thread's local position within that block. Together they give the thread's unique position in the entire output matrix.
+        </p>
+
+        <p>
+          <strong>Bounds check.</strong> The grid may be slightly larger than the matrix if the dimensions are not perfectly divisible by the block size, so we guard with <code class="bg-gray-200 text-gray-800 px-1 rounded">if (t_row &lt; M &amp;&amp; t_col &lt; N)</code> to avoid out of bounds writes.
+        </p>
+
+        <p>
+          <strong>Dot product loop.</strong> Inside the guard, the thread iterates over the shared dimension <em>K</em>. On each iteration <em>i</em>, it reads <code class="bg-gray-200 text-gray-800 px-1 rounded">A[t_row * K + i]</code> and <code class="bg-gray-200 text-gray-800 px-1 rounded">B[i * N + t_col]</code>, multiplies them, and accumulates the result into <code class="bg-gray-200 text-gray-800 px-1 rounded">tmp</code>. Both matrices are stored in row-major order.
+        </p>
+
+        <p>
+          <strong>Writing the result.</strong> After the loop, the accumulated dot product is written to <code class="bg-gray-200 text-gray-800 px-1 rounded">C[t_row * N + t_col]</code>, the corresponding element in the output matrix.
+        </p>
+
+
+        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">Global memory bandwidth</h3>
+        <p>
+          While this kernel is correct, it is far from efficient. For every output element, the thread reads an entire row of <em>A</em> and an entire column of <em>B</em> directly from global memory, which has very high latency (~400–800 cycles). Across the whole matrix, the total number of global memory reads is:
+        </p>
+        <div class="py-4 text-center text-2xl">
+          $$ \text{reads} = M \cdot N \cdot 2K $$
+        </div>
+        <p>
+          IF you think about the previous visual we saw, a lot of the reads are redundant in this kernel. We keep reloading the same rows and the columns and when the matrix gets large, we run into the memory bound realm real quick. 
+        </p>
       </section>
 
 
