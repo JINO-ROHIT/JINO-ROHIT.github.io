@@ -132,7 +132,70 @@ int t_col = blockIdx.x * blockDim.x + threadIdx.x;</code></pre>
           $$ \text{reads} = M \cdot N \cdot 2K $$
         </div>
         <p>
-          IF you think about the previous visual we saw, a lot of the reads are redundant in this kernel. We keep reloading the same rows and the columns and when the matrix gets large, we run into the memory bound realm real quick. 
+          If you think about the previous visual we saw, a lot of the reads are redundant in this kernel. We keep reloading the same rows and the columns and when the matrix gets large, we run into the memory bound realm real quick. 
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Tiled Matrix Multiplication</h2>
+        <p>
+          Rather than each thread fetching that data independently, we can load a <em>tile</em> (a small block-sized sub-matrix) into fast on-chip <strong>shared memory</strong>, and then have all threads in the block reuse that tile.
+        </p>
+        <p>
+          Shared memory is roughly 20x faster than global memory (~20 cycles vs ~400 cycles), but the caveat is that it is quite small, typically 48 KB per streaming multiprocessor. So we need to design an algorithm to process the matrices in tiles that fit within this budget.
+        </p>
+
+        <p>Lets understand this visually again. Assume the tile size is (2 x 2)</p>
+        <p> You can see at each step, we load the blue tile and red tile, do a product product and fill in a tile in the result C matrix.</p>
+
+        <img src="artifacts/tiled_base.png" class="mx-auto my-4" />
+        <img src="artifacts/tiled_step1.png" class="mx-auto my-4" />
+        <img src="artifacts/tiled_step2.png" class="mx-auto my-4" />
+        <img src="artifacts/tiled_step3.png" class="mx-auto my-4" />
+        <img src="artifacts/tiled_step4.png" class="mx-auto my-4" />
+
+        <p>
+          This is how it would look on code - 
+        </p>
+
+
+        <pre class="bg-gray-900 text-gray-100 p-5 rounded-lg overflow-x-auto text-sm font-mono"><code>#define BM 16
+#define BK 16
+#define BN 16
+
+__global__ void tiled_matmul(float* A, float* B, float* C, const int M, const int K, const int N){
+    __shared__ float As[BM * BK]; // 256 elements can be loaded into this
+    __shared__ float Bs[BK * BN];
+
+
+    int global_row = blockIdx.y * blockDim.y + threadIdx.y;
+    int global_col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int tile_row = threadIdx.y;
+    int tile_col = threadIdx.x;
+
+    float tmp = 0.0f;
+    for(int tile_idx = 0; tile_idx < K/BK; tile_idx += 1){
+        // first we load onto tiles A and B
+
+        As[tile_row * BK + tile_col] = A[global_row * K + tile_idx * BK + tile_col];
+        Bs[tile_row * BN + tile_col] = B[(tile_idx * BK + tile_row) * N + global_col];
+        __syncthreads();
+        
+        for(int i = 0; i < BK; i++){
+            tmp += As[tile_row * BK + i] * Bs[i * BN + tile_col];
+        }
+
+        __syncthreads();    
+    }
+    C[global_row * N + global_col] = tmp;
+}</code></pre>
+
+      </section>
+
+      <section class="space-y-4">
+        <p>
+          In the final section of the blog, we extend these ideas and apply them to build flash attention!
         </p>
       </section>
 
