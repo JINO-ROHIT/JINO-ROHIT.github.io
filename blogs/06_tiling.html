@@ -155,7 +155,11 @@ int t_col = blockIdx.x * blockDim.x + threadIdx.x;</code></pre>
         <img src="artifacts/tiled_step4.png" class="mx-auto my-4" />
 
         <p>
-          This is how it would look on code - 
+          This is how it would look on code -
+        </p>
+        <p>
+          <strong>the visual shows a tile of result being computed. But in the code, the result is computed on the thread level
+          so a single element at each pass instead of a whole tile being saved into the matrix C</strong>
         </p>
 
 
