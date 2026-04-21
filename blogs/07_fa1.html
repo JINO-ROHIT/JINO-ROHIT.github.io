@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Flash Attention Series - Flash Attention 1</title>
+
+    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body);"></script>
+
+  </head>
+
+  <body class="bg-orange-50 text-gray-900 w-full max-w-3xl mx-auto px-5 md:px-0 pb-20">
+    <nav class="flex justify-between items-center py-6 border-b border-gray-300">
+      <h1 class="font-serif text-3xl font-bold">Jino Rohit</h1>
+      <div class="flex gap-6 text-sm">
+        <a href="../index.html" class="hover:text-orange-600 transition">Home</a>
+        <a href="./blog.html" class="hover:text-orange-600 transition">Blogs</a>
+        <a href="../projects/projects.html" class="hover:text-orange-600 transition">Projects</a>
+      </div>
+    </nav>
+
+    <header class="mt-12">
+      <h1 class="font-serif text-4xl font-bold leading-tight text-gray-950">
+        Flash Attention Series - Flash Attention 1 implementation
+      </h1>
+      <p class="text-sm text-gray-600 mt-4 italic">April 21, 2026 • 20 min read</p>
+    </header>
+
+    <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
+  
+      <section class="space-y-4">
+        <section class="space-y-4">
+        <p>
+          This is final part of the three-part series where we understand the smallest moving pieces of the Flash Attention paper and then put them together into the full algorithm.
+        </p>
+        <p>
+          Before continuing, I recommend reading the blog on
+          <a href="https://jino-rohit.github.io/blogs/05_softmax.html" class="text-orange-600 underline">Mastering Softmax</a> and 
+          <a href="https://jino-rohit.github.io/blogs/06_tiling.html" class="text-orange-600 underline">Tiled Matrix Multiplication</a>.
+        </p>
+        <p>Those two are very important to understand before moving onto this final blog post.</p> <br>
+        <p>
+          In this post we will look at what makes flash attention fast and implement in CUDA C++. 
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Transformers
+        </h2>
+
+        <p>
+          Large language models(LLM) in general use transformers based architecture and attention forms the heart of any transformer.
+        </p>
+
+        <p>Attention says given three matrices Q, K and V of size (N, d), we perform self attention using </p>
+
+        <!-- put in latex -->
+        <p> S = Q . K^T</p>
+        <p> P = softmax(S)</p>
+        <p> O = P.V </p>
+        
+        <p> S is whats called the attention score, P when it goes through softmax, we get normalized attention scores and finally O is final output after a linear
+            transformation. O is going to be of size seq len * dim( technically this is head dim but lets worrry about it later)
+        </p>
+
+        <p> well, from this , the most intensive operation has to be computing S and O. they involve matrix multiplications but even worse, they have to be done
+            sequentially. the complexity for this operation in general is O(N2), (explain why)
+        </p>
+
+        <!-- <div class="py-4 text-center text-2xl">
+          $$ c_{ij} = \sum_{k=1}^{n} a_{ik} \cdot b_{kj} $$
+        </div> -->
+
+      </section>
+
+      <section class="space-y-4 font-serif">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          What is flash attention doing then?
+        </h2>
+
+        <p>
+          whats the simplest way you can think of making this fast? hmmm using them in lower precision? or using sparse matrices, great ideas but they are all
+          approximations but what we need is the exact answer self attention gives us.
+        </p>
+
+        <p>To present flash attention, we need still to cover few more concepts</p>
+
+        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">Hierachy of Memory in GPU</h3>
+
+        <img src="artifacts/memory2.png" class="mx-auto my-4" />
+
+        <p> start from the bottom of the diagram, you cna ignore the CPU DRAM since its not part of the GPU memory</p>
+        <p> the HBM, also known as the device memory in CUDA is actually present off the chip but packaged together on the same board. this is what hosts the 
+            global memory and it is the slowest memory of all to access. all the threads across all the blocks can access this. the cycles needed to access this is <>
+        </p>
+        <p> then comes the SRAM, this is an on chip memory. all the threads within the same block can only access this. the cycles needed to access this is <></p>
+
+        there are a lot more memory types but this is a good start.
+
+        <p> a general intuition from this diagram is that, well the global memory is so slow, we want to try to avoid accessing stuff from the global memory</p>
+
+        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">Compute bound vs memory bound</h3>
+
+        sorry last concept before we move into flash attention, hehe
+        <p>compute bound is where the device spends majority of its time on computation. data flow is faster than the gpu can complete its operations</p>
+        <p>memory bound is where the device is actually stalled moving things rather than the computation</p>
+
+        <p> so now, what realm do you think attention belongs to? the compute bound or the memory bound?</p>
+
+        
+      <section class="space-y-4">
+        <p>
+          We did it, this is flash attention v1 and youve now understood the concepts behind it! 
+        </p>
+      </section>
+
+
+    </article>
+
+    <script>
+      lucide.createIcons();
+    </script>
+  </body>
+</html>
