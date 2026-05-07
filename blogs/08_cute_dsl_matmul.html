@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Outperforming cuBLAS on Ada Lovelace using CuTe DSL</title>
+
+    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body);"></script>
+
+    <link
+  href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css"
+  rel="stylesheet"
+/>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+
+<!-- line numbers plugin -->
+<link
+  href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.css"
+  rel="stylesheet"
+/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.js"></script>
+
+<style>
+  pre[class*="language-"] {
+    background: #111827 !important; /* Tailwind bg-gray-900 */
+    color: #f9fafb !important;
+    font-size: 12px;
+    line-height: 1.4;
+    padding: 12px !important;
+    margin: 0;
+    border-radius: 10px;
+    border: 1px solid #374151;
+  }
+
+  code[class*="language-"] {
+    color: #f9fafb !important;
+    font-weight: 500;
+  }
+
+  .line-numbers .line-numbers-rows {
+    font-size: 12px;
+  }
+</style>
+
+  </head>
+
+  <body class="bg-orange-50 text-gray-900 w-full max-w-3xl mx-auto px-5 md:px-0 pb-20">
+    <nav class="flex justify-between items-center py-6 border-b border-gray-300">
+      <h1 class="font-serif text-3xl font-bold">Jino Rohit</h1>
+      <div class="flex gap-6 text-sm">
+        <a href="../index.html" class="hover:text-orange-600 transition">Home</a>
+        <a href="./blog.html" class="hover:text-orange-600 transition">Blogs</a>
+        <a href="../projects/projects.html" class="hover:text-orange-600 transition">Projects</a>
+      </div>
+    </nav>
+
+    <header class="mt-12">
+      <h1 class="font-serif text-4xl font-bold leading-tight text-gray-950">
+        Outperforming cuBLAS on Ada Lovelace using CuTe DSL
+      </h1>
+      <p class="text-sm text-gray-600 mt-4 italic">May 06, 2026 • 20 min read</p>
+    </header>
+
+    <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
+  
+      <section class="space-y-4">
+        <section class="space-y-4">
+        <p>
+          In this article, we will iteratively optimize a series of matrix multiplication kernels written in CuTe DSL. The final kernel reaches performance
+          on par with cuBLAS and we will walk through every bit of optimization involved. 
+        </p>
+
+        <p>
+            You will find all the code available on my <a href="https://github.com/JINO-ROHIT/kernels/tree/main/cute_dsl/matmul" class="text-gray-900 font-semibold hover:text-orange-600 transition">Github*</a>
+        </p>
+
+        <p style="font-size: 0.9rem;"><strong>*All experiments are performed on an RTX 4060 Ti GPU.</strong></p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          CuTe DSL
+        </h2>
+
+        <p>
+          CuTe DSL is a Python-based domain-specific language (DSL) designed for dynamic compilation of high-performance GPU kernels. 
+          It evolved from the C++ CUTLASS library and is now available as a decorator-based DSL.
+          You can read more on the official documentation page.
+        </p>
+
+
+      </section>
+
+      <section class="space-y-4 font-serif">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Naive Matrix Multiplication
+        </h2>
+
+        <p>
+          The simplest GPU implementation maps one thread to each output element \(C_{ij}\). That thread loads an entire row of <em>A</em> and an entire column of <em>B</em> from global memory, then accumulates their dot product.
+        </p>
+
+        <p>Lets take a look at this visually with a small matrix</p>
+
+        <img src="artifacts/matmul_step1.png" class="mx-auto my-4" />
+        <img src="artifacts/matmul_step2.png" class="mx-auto my-4" />
+        <img src="artifacts/matmul_step3.png" class="mx-auto my-4" />
+        <img src="artifacts/matmul_step4.png" class="mx-auto my-4" />
+
+        <p>Now in code</p>
+
+
+<pre class="line-numbers">
+<code class="language-python">
+@cute.kernel
+def matmul_kernel(A: cute.Tensor, B: cute.Tensor, C: cute.Tensor, M, N, K):
+    bidx_x, bidx_y = cute.arch.block_idx()[0], cute.arch.block_idx()[1]
+    bdim_x, bdim_y = cute.arch.block_dim()[0], cute.arch.block_dim()[1]
+    tidx_x, tidx_y = cute.arch.thread_idx()[0], cute.arch.thread_idx()[1]
+
+    col = bidx_x * bdim_x + tidx_x
+    row = bidx_y * bdim_y + tidx_y
+
+    # no early return supported yet
+    # ref - https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/dsl_control_flow.html
+
+    acc = cute.Float32(0)
+
+    if row < M and col < N:
+        for k in range(K):
+            acc += cute.Float32(A[row, k]) * cute.Float32(B[k, col])
+
+        C[row, col] = cute.Float16(acc)
+</code>
+</pre>
+
+        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">Performance and Profiling</h3>
+
+        <p>
+            This kernel has <strong>1.33 TFLOP/s</strong> with a kernel execution time of <strong>13.29 ms</strong>.
+            This is roughly ~11% of what pytorch cuBLAS gives us.
+        </p>
+
+        <p>
+            Now let's turn our attention to what the ncu-ui profiler has to say about this kernel.
+        </p>
+
+        <img src="artifacts/cute_dsl_matmul/naive_matmul_01.png" class="mx-auto my-4" />
+
+        <p>On a first glance, it says that the compute and memory throughput to be extremely high, but how can this be possible? All we wrote was an extremely
+            naive kernel in hardly 15 lines.
+        </p>
+        <p> I want you to pay attention to two things-
+            1. first the line stating "The workload achieved 6% of this device's FP32 peak performance"
+            2. expand the section and check the indiviual breakdown for the compute throughput.
+        </p>
+
+        <img src="artifacts/cute_dsl_matmul/naive_matmul_02.png" class="mx-auto my-4" />
+
+        <p> Oh, whats this?
+          From the docs, we get "The LSU pipeline issues load, store, atomic, and reduction instructions to the L1TEX unit for global, local, and shared memory"
+          And that's 98% of our compute throughput! This means the warp scheduler is almost constantly issuing load/store instructions and is hardly using any of
+          our compute units.
+        </p>
+
+      </section>
+
+
+
+    </article>
+
+    <script>
+      lucide.createIcons();
+    </script>
+  </body>
+</html>
