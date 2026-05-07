@@ -240,87 +240,100 @@ f32 - C's type</p>
   all that hard stuff for us.
 </p>
 
-<p>Now that we understand why we need to make use of our tensor cores, lets understand this kernel a bit</p>
+<p>Now that we understand why tensor cores matter, let's break the kernel into the most important parts.</p>
 
+<h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">1) Map each block and thread to a tile</h3>
+<p>This decides <em>which</em> block of A, B, and C this CTA works on.</p>
 <pre class="line-numbers">
 <code class="language-python">
-@cute.kernel
-def sgemm_kernel(
-    A: cute.Tensor, 
-    B: cute.Tensor, 
-    C: cute.Tensor, 
-    smem_layout_a: cute.Layout,
-    smem_layout_b: cute.Layout,
-    tiled_copy_a: cute.TiledCopy,
-    tiled_copy_b: cute.TiledCopy,
-    tiled_mma: cute.TiledMma,
-    epilogue_op: cutlass.Constexpr = lambda x: x):
+tid_x, _, _ = cute.arch.thread_idx()
+bid_x, bid_y, _ = cute.arch.block_idx()
 
-    tid_x, _, _ = cute.arch.thread_idx()
-    bid_x, bid_y, _ = cute.arch.block_idx()
+tiler_coord = (bid_x, bid_y, None)
+gA = cute.local_tile(A, cta_tiler, tiler_coord, proj=(1, None, 1))
+gB = cute.local_tile(B, cta_tiler, tiler_coord, proj=(None, 1, 1))
+gC = cute.local_tile(C, cta_tiler, tiler_coord, proj=(1, 1, None))
+</code>
+</pre>
+<p>
+  Think of this as assigning work: this block gets one tile of output C, and the matching tiles of A and B needed to compute it.
+</p>
 
-    tiler_coord = (bid_x, bid_y, None)
+<h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">2) Create thread value partitions for each tile</h3>
+<p>For each thread index, we get a slice of the value it owns from the tv layout, and then apply it using partition on both source and destination.</p>
+<pre class="line-numbers">
+<code class="language-python">
+smem = cutlass.utils.SmemAllocator()
+sA = smem.allocate_tensor(cutlass.Float32, smem_layout_a, 16)
+sB = smem.allocate_tensor(cutlass.Float32, smem_layout_b, 16)
 
-    gA = cute.local_tile(A, cta_tiler, tiler_coord, proj=(1, None, 1))
-    gB = cute.local_tile(B, cta_tiler, tiler_coord, proj=(None, 1, 1))
-    gC = cute.local_tile(C, cta_tiler, tiler_coord, proj=(1, 1, None))
+thr_copy_a = tiled_copy_a.get_slice(tid_x)
+thr_copy_b = tiled_copy_b.get_slice(tid_x)
 
-    
-    smem = cutlass.utils.SmemAllocator()
-    sA = smem.allocate_tensor(cutlass.Float32, smem_layout_a, 16)
-    sB = smem.allocate_tensor(cutlass.Float32, smem_layout_b, 16)
-    thr_copy_a = tiled_copy_a.get_slice(tid_x)
-    thr_copy_b = tiled_copy_b.get_slice(tid_x)
+tAgA = thr_copy_a.partition_S(gA)  # source in global
+tBgB = thr_copy_b.partition_S(gB)
+tAsA = thr_copy_a.partition_D(sA)  # destination in shared
+tBsB = thr_copy_b.partition_D(sB)
+</code>
+</pre>
 
-    tAgA = thr_copy_a.partition_S(gA)
-    tBgB = thr_copy_b.partition_S(gB)
+<h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">3) Build MMA fragments (register tiles)</h3>
+<p>Tensor core instructions read fragments in specific layouts, so we create those per-thread fragments next.</p>
+<pre class="line-numbers">
+<code class="language-python">
+thr_mma = tiled_mma.get_slice(tid_x)
+tCsA = thr_mma.partition_A(sA)
+tCsB = thr_mma.partition_B(sB)
+tCgC = thr_mma.partition_C(gC)
 
-    tAsA = thr_copy_a.partition_D(sA)
-    tBsB = thr_copy_b.partition_D(sB)
+tCrA = tiled_mma.make_fragment_A(tCsA)
+tCrB = tiled_mma.make_fragment_B(tCsB)
+tCrC = tiled_mma.make_fragment_C(tCgC)
+tCrC.fill(0.0)
+</code>
+</pre>
+<p>
+  `tCrC` is the accumulator fragment in registers. This is where repeated MMA operations accumulate partial sums.
+</p>
 
+<h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">4) Main K loop</h3>
+<p>
+  For each K tile: we first load from global to shared,we need to synchronize before we can start loading them into the register fragements.
+  Once the tile has been moved into the register fragement, we perform a tensor core GEMM and then move to the next tile.
+</p>
+<pre class="line-numbers">
+<code class="language-python">
+num_tiles_k = cute.size(tAgA, mode=[3])
+num_mma_k = cute.size(tCrA, mode=[2])
 
-    thr_mma = tiled_mma.get_slice(tid_x)
-    tCsA = thr_mma.partition_A(sA)
-    tCsB = thr_mma.partition_B(sB)
-    tCgC = thr_mma.partition_C(gC)
-    tCrA = tiled_mma.make_fragment_A(tCsA)
-    tCrB = tiled_mma.make_fragment_B(tCsB)
-    tCrC = tiled_mma.make_fragment_C(tCgC)
-    tCrC.fill(0.0)
+for tile_k_idx in range(num_tiles_k, unroll_full=False):
+    cute.copy(tiled_copy_a, tAgA[None, None, None, tile_k_idx], tAsA)
+    cute.copy(tiled_copy_b, tBgB[None, None, None, tile_k_idx], tBsB)
+    cute.arch.barrier()  # like __syncthreads()
 
-
-    num_tiles_k = cute.size(tAgA, mode=[3])
-    num_mma_k = cute.size(tCrA, mode=[2])
-
-    for tile_k_idx in range(num_tiles_k, unroll_full=False):
-        cute.copy(
-            tiled_copy_a,
-            tAgA[None, None, None, tile_k_idx],
-            tAsA,
+    for mma_k_idx in range(num_mma_k, unroll_full=True):
+        cute.autovec_copy(tCsA[None, None, mma_k_idx], tCrA[None, None, mma_k_idx])
+        cute.autovec_copy(tCsB[None, None, mma_k_idx], tCrB[None, None, mma_k_idx])
+        cute.gemm(
+            tiled_mma,
+            tCrC,
+            tCrA[None, None, mma_k_idx],
+            tCrB[None, None, mma_k_idx],
+            tCrC,
         )
-        cute.copy(
-            tiled_copy_b,
-            tBgB[None, None, None, tile_k_idx],
-            tBsB,
-        )
-        cute.arch.barrier() # block wide synchronization like __syncthreads
 
-        for mma_k_idx in range(num_mma_k, unroll_full=True):
-            cute.autovec_copy(tCsA[None, None, mma_k_idx], tCrA[None, None, mma_k_idx])
-            cute.autovec_copy(tCsB[None, None, mma_k_idx], tCrB[None, None, mma_k_idx])
-            cute.gemm(
-                tiled_mma,
-                tCrC,
-                tCrA[None, None, mma_k_idx],
-                tCrB[None, None, mma_k_idx],
-                tCrC,
-            )
+    cute.arch.barrier()
+</code>
+</pre>
 
-        cute.arch.barrier() # block wide synchro
 
-    tCrC.store(epilogue_op(tCrC.load()))
-    c_copy_atom = cute.make_copy_atom(cute.nvgpu.CopyUniversalOp(), cutlass.Float32)
-    cute.copy(c_copy_atom, tCrC, tCgC)
+<h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">5) Epilogue: store to C</h3>
+<p>After accumulation, we can write results back.</p>
+<pre class="line-numbers">
+<code class="language-python">
+tCrC.store(epilogue_op(tCrC.load()))
+c_copy_atom = cute.make_copy_atom(cute.nvgpu.CopyUniversalOp(), cutlass.Float32)
+cute.copy(c_copy_atom, tCrC, tCgC)
 </code>
 </pre>
 
