@@ -71,7 +71,6 @@
     <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
   
       <section class="space-y-4">
-        <section class="space-y-4">
         <p>
           In this article, we will iteratively optimize a series of matrix multiplication kernels written in CuTe DSL. The final kernel reaches performance
           on par with cuBLAS and we will walk through every bit of optimization involved. 
@@ -107,7 +106,7 @@
           The simplest GPU implementation maps one thread to each output element \(C_{ij}\). That thread loads an entire row of <em>A</em> and an entire column of <em>B</em> from global memory, then accumulates their dot product.
         </p>
 
-        <p>Lets take a look at this visually with a small matrix</p>
+        <p>Let's take a look at this visually with a small matrix</p>
 
         <img src="artifacts/matmul_step1.png" class="mx-auto my-4" />
         <img src="artifacts/matmul_step2.png" class="mx-auto my-4" />
@@ -159,12 +158,12 @@ def matmul_kernel(A: cute.Tensor, B: cute.Tensor, C: cute.Tensor, M, N, K):
         </p>
         <p> I want you to pay attention to two things-
             1. first the line stating "The workload achieved 6% of this device's FP32 peak performance"
-            2. expand the section and check the indiviual breakdown for the compute throughput.
+            2. expand the section and check the individual breakdown for the compute throughput.
         </p>
 
         <img src="artifacts/cute_dsl_matmul/naive_matmul_02.png" class="mx-auto my-4" />
 
-        <p> Oh, whats this?
+        <p> Oh, what's this?
           From the docs, we get "The LSU pipeline issues load, store, atomic, and reduction instructions to the L1TEX unit for global, local, and shared memory"
           And that's 98% of our compute throughput! This means the warp scheduler is almost constantly issuing load/store instructions and is hardly using any of
           our compute units.
@@ -178,7 +177,7 @@ def matmul_kernel(A: cute.Tensor, B: cute.Tensor, C: cute.Tensor, M, N, K):
           Kernel 2 - MMA Tensor Cores
         </h2>
 
-        <h2 class="text-3xl font-bold text-gray-950">How CUDA Cores vs Tensor Cores Work</h2>
+        <h3 class="text-xl font-semibold text-gray-800 mt-4">How CUDA Cores vs Tensor Cores Work</h3>
 
         <h3 class="text-xl font-semibold text-gray-800">CUDA Cores: Element by Element</h3>
         <p>
@@ -207,25 +206,29 @@ def matmul_kernel(A: cute.Tensor, B: cute.Tensor, C: cute.Tensor, M, N, K):
 
         <p>It is not necessary to know this layout by heart, but let's go through one in case to see it visually.</p>
 
-        <p>mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32
+        <p>
+          <code class="inline-code">mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32</code>
+        </p>
 
-Let's break it down. Just for reference, here is the GEMM operation:
+        <p>Let's break it down. Just for reference, here is the GEMM operation:</p>
 
-D = A * B + C
-
-m16n8k16 - m is 16, n is 8 and k is 16. So the matrices A and B are 16 x 16 and 16 x 8
-
-row - matrix A is in row-major format
-
-col - matrix B is in col-major format
-
-f32 - D's type
-
-f16 - A's type
-
-f16 - B's type
-
-f32 - C's type</p>
+        <p>
+          D = A * B + C
+          <br />
+          m16n8k16 - m is 16, n is 8 and k is 16. So the matrices A and B are 16 x 16 and 16 x 8
+          <br />
+          row - matrix A is in row-major format
+          <br />
+          col - matrix B is in col-major format
+          <br />
+          f32 - D's type
+          <br />
+          f16 - A's type
+          <br />
+          f16 - B's type
+          <br />
+          f32 - C's type
+        </p>
 
 <p>For the A matrix, this is how the threads should load their data in fragments</p>
 
@@ -236,7 +239,7 @@ f32 - C's type</p>
   row 8 col 0 and col 1, row 0 col 8 and col 9.
 </p>
 
-<p>The docs also gives a code snippet on how to map each thread's value, but we dont need to know all that, because the mma instruction is going to handle
+<p>The docs also gives a code snippet on how to map each thread's value, but we don't need to know all that, because the mma instruction is going to handle
   all that hard stuff for us.
 </p>
 
@@ -298,8 +301,8 @@ tCrC.fill(0.0)
 
 <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">4) Main K loop</h3>
 <p>
-  For each K tile: we first load from global to shared,we need to synchronize before we can start loading them into the register fragements.
-  Once the tile has been moved into the register fragement, we perform a tensor core GEMM and then move to the next tile.
+  For each K tile: we first load from global to shared, then synchronize before we can start loading into the register fragments.
+  Once the tile is in registers, we run the tensor-core GEMM and then move to the next tile.
 </p>
 <pre class="line-numbers">
 <code class="language-python">
@@ -349,12 +352,12 @@ cute.copy(c_copy_atom, tCrC, tCgC)
 
         <img src="artifacts/cute_dsl_matmul/mma_02.png" class="mx-auto my-4" />
 
-        <p>Great! This achieves 33% of this device's FP32 peak performance and also look at the roofline!
+        <p>Great! This achieves 33% of this device's FP32 peak performance, and take a look at the roofline.
         </p>
 
         <img src="artifacts/cute_dsl_matmul/mma_03.png" class="mx-auto my-4" />
 
-        <p> From the recommendations, the most taxing one seems to be bank conflicts, why dont we fix that with some padding!
+        <p> From the recommendations, the most taxing one seems to be bank conflicts, so why don't we fix that with some padding?
         </p>
     </section>
 
@@ -363,8 +366,8 @@ cute.copy(c_copy_atom, tCrC, tCgC)
           Kernel 3 - Fixing Bank Conflicts!
         </h2>
 
-        <P>The only change is going to be in how we create strides for the shared memory layout in the host function.</P>
-        <p>The change is as simple as padding an extra padding to each smem layout we create for A and B</p>
+        <p>The only change is how we create strides for the shared memory layout in the host function.</p>
+        <p>The change is as simple as adding a little padding to each shared-memory (smem) layout we create for A and B.</p>
 
         <pre class="line-numbers">
 <code class="language-python">
@@ -394,7 +397,7 @@ def sgemm_host(a: cute.Tensor,
 
 <img src="artifacts/cute_dsl_matmul/mma_04.png" class="mx-auto my-6" alt="Tensor cores diagram" />
 
-<p>No more bank conflicts and improvement in the peak fp32 performance as well! </p>
+<p>No more bank conflicts, and improved peak FP32 performance as well.</p>
 
 <p>
   This kernel now has <strong>8.34 TFLOP/s</strong> and we are at <strong>~71.1%</strong> of cuBLAS!
