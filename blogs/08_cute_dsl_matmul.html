@@ -100,7 +100,7 @@
 
       <section class="space-y-4 font-serif">
         <h2 class="text-2xl font-serif font-bold text-gray-950">
-          Naive Matrix Multiplication
+          Kernel 1 - Naive Matrix Multiplication
         </h2>
 
         <p>
@@ -171,10 +171,229 @@ def matmul_kernel(A: cute.Tensor, B: cute.Tensor, C: cute.Tensor, M, N, K):
         </p>
 
       </section>
+    
+
+    <section class="space-y-4 font-serif">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Kernel 2 - MMA Tensor Cores
+        </h2>
+
+        <h2 class="text-3xl font-bold text-gray-950">How CUDA Cores vs Tensor Cores Work</h2>
+
+        <h3 class="text-xl font-semibold text-gray-800">CUDA Cores: Element by Element</h3>
+        <p>
+          A CUDA core executes one instruction on one piece of data per clock cycle. When you compute <code class="inline-code">c = a * b + c</code>, 
+          it's a fused multiply-add (FMA) on a single number.
+        </p>
+        <p>
+          To add two vectors of size 32, you need 32 CUDA cores working in parallel - each adding one pair of elements simultaneously.
+        </p>
+
+        <h3 class="text-xl font-semibold text-gray-800 mt-6">Tensor Cores: Whole Matrix at Once</h3>
+        <p>
+          Tensor cores are built for <strong>matrix multiply-accumulate</strong>: \( D = A \times B + C \), 
+          where A, B, C, and D are matrices.
+        </p>
+        <p>
+          A single tensor core can multiply a 4 x 4 matrix with another 4 x 4 matrix in one cycle - that's 64 FMA operations!
+        </p>
+
+        <img src="artifacts/tensor_cores.png" class="mx-auto my-6" alt="Tensor cores diagram" />
+
+        <p>MMA instructions work at a warp-level, i.e. 32 threads in a warp work together to compute one small GEMM. So you need to think of all the 32 threads
+          as a single unit of compute. The hardware expects A, B, and C fragments to be distributed across 32 threads in a very specific layout. 
+          Thread 0 might hold certain rows and columns of A, thread 1 might hold others etc and this depends on the specific instruction you are using.
+        </p>
+
+        <p>It is not necessary to know this layout by heart, but let's go through one in case to see it visually.</p>
+
+        <p>mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32
+
+Let's break it down. Just for reference, here is the GEMM operation:
+
+D = A * B + C
+
+m16n8k16 - m is 16, n is 8 and k is 16. So the matrices A and B are 16 x 16 and 16 x 8
+
+row - matrix A is in row-major format
+
+col - matrix B is in col-major format
+
+f32 - D's type
+
+f16 - A's type
+
+f16 - B's type
+
+f32 - C's type</p>
+
+<p>For the A matrix, this is how the threads should load their data in fragments</p>
+
+<img src="artifacts/cute_dsl_matmul/mma_01.png" class="mx-auto my-6" alt="Tensor cores diagram" />
+
+<p>See how thread 0 holds 
+  row 0 col 0 and col 1, row 0 col 8 and col 9.
+  row 8 col 0 and col 1, row 0 col 8 and col 9.
+</p>
+
+<p>The docs also gives a code snippet on how to map each thread's value, but we dont need to know all that, because the mma instruction is going to handle
+  all that hard stuff for us.
+</p>
+
+<p>Now that we understand why we need to make use of our tensor cores, lets understand this kernel a bit</p>
+
+<pre class="line-numbers">
+<code class="language-python">
+@cute.kernel
+def sgemm_kernel(
+    A: cute.Tensor, 
+    B: cute.Tensor, 
+    C: cute.Tensor, 
+    smem_layout_a: cute.Layout,
+    smem_layout_b: cute.Layout,
+    tiled_copy_a: cute.TiledCopy,
+    tiled_copy_b: cute.TiledCopy,
+    tiled_mma: cute.TiledMma,
+    epilogue_op: cutlass.Constexpr = lambda x: x):
+
+    tid_x, _, _ = cute.arch.thread_idx()
+    bid_x, bid_y, _ = cute.arch.block_idx()
+
+    tiler_coord = (bid_x, bid_y, None)
+
+    gA = cute.local_tile(A, cta_tiler, tiler_coord, proj=(1, None, 1))
+    gB = cute.local_tile(B, cta_tiler, tiler_coord, proj=(None, 1, 1))
+    gC = cute.local_tile(C, cta_tiler, tiler_coord, proj=(1, 1, None))
+
+    
+    smem = cutlass.utils.SmemAllocator()
+    sA = smem.allocate_tensor(cutlass.Float32, smem_layout_a, 16)
+    sB = smem.allocate_tensor(cutlass.Float32, smem_layout_b, 16)
+    thr_copy_a = tiled_copy_a.get_slice(tid_x)
+    thr_copy_b = tiled_copy_b.get_slice(tid_x)
+
+    tAgA = thr_copy_a.partition_S(gA)
+    tBgB = thr_copy_b.partition_S(gB)
+
+    tAsA = thr_copy_a.partition_D(sA)
+    tBsB = thr_copy_b.partition_D(sB)
+
+
+    thr_mma = tiled_mma.get_slice(tid_x)
+    tCsA = thr_mma.partition_A(sA)
+    tCsB = thr_mma.partition_B(sB)
+    tCgC = thr_mma.partition_C(gC)
+    tCrA = tiled_mma.make_fragment_A(tCsA)
+    tCrB = tiled_mma.make_fragment_B(tCsB)
+    tCrC = tiled_mma.make_fragment_C(tCgC)
+    tCrC.fill(0.0)
+
+
+    num_tiles_k = cute.size(tAgA, mode=[3])
+    num_mma_k = cute.size(tCrA, mode=[2])
+
+    for tile_k_idx in range(num_tiles_k, unroll_full=False):
+        cute.copy(
+            tiled_copy_a,
+            tAgA[None, None, None, tile_k_idx],
+            tAsA,
+        )
+        cute.copy(
+            tiled_copy_b,
+            tBgB[None, None, None, tile_k_idx],
+            tBsB,
+        )
+        cute.arch.barrier() # block wide synchronization like __syncthreads
+
+        for mma_k_idx in range(num_mma_k, unroll_full=True):
+            cute.autovec_copy(tCsA[None, None, mma_k_idx], tCrA[None, None, mma_k_idx])
+            cute.autovec_copy(tCsB[None, None, mma_k_idx], tCrB[None, None, mma_k_idx])
+            cute.gemm(
+                tiled_mma,
+                tCrC,
+                tCrA[None, None, mma_k_idx],
+                tCrB[None, None, mma_k_idx],
+                tCrC,
+            )
+
+        cute.arch.barrier() # block wide synchro
+
+    tCrC.store(epilogue_op(tCrC.load()))
+    c_copy_atom = cute.make_copy_atom(cute.nvgpu.CopyUniversalOp(), cutlass.Float32)
+    cute.copy(c_copy_atom, tCrC, tCgC)
+</code>
+</pre>
+
+<h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">Performance and Profiling</h3>
+
+        <p>
+            This kernel has <strong>7.37 TFLOP/s</strong> and we are already at <strong>~64.1%</strong> of what cuBLAS gives us.
+        </p>
+
+        <p>
+            Profiling time!
+        </p>
+
+        <img src="artifacts/cute_dsl_matmul/mma_02.png" class="mx-auto my-4" />
+
+        <p>Great! This achieves 33% of this device's FP32 peak performance and also look at the roofline!
+        </p>
+
+        <img src="artifacts/cute_dsl_matmul/mma_03.png" class="mx-auto my-4" />
+
+        <p> From the recommendations, the most taxing one seems to be bank conflicts, why dont we fix that with some padding!
+        </p>
+    </section>
+
+    <section class="space-y-4 font-serif">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Kernel 3 - Fixing Bank Conflicts!
+        </h2>
+
+        <P>The only change is going to be in how we create strides for the shared memory layout in the host function.</P>
+        <p>The change is as simple as padding an extra padding to each smem layout we create for A and B</p>
+
+        <pre class="line-numbers">
+<code class="language-python">
+@cute.jit
+def sgemm_host(a: cute.Tensor, 
+               b: cute.Tensor,
+               c: cute.Tensor,
+               copy_bits: cutlass.Constexpr = 128):
+    
+    tile_m, tile_n, tile_k = cta_tiler
+    mma_m, mma_n = mma_tiler
+    threads = mma_m * mma_n
+
+    a_major_mode = cutlass.utils.LayoutEnum.from_tensor(a)
+    b_major_mode = cutlass.utils.LayoutEnum.from_tensor(b)
+
+    print(a_major_mode, b_major_mode) # both row major
+
+    smem_layout_a = cute.make_layout(
+        shape=(tile_m, tile_k), stride=(1, tile_m + 4) # + 4 for padding
+    )
+    smem_layout_b = cute.make_layout(
+        shape=(tile_n, tile_k), stride=(1, tile_n + 4)
+    )
+</code>
+</pre>
+
+<img src="artifacts/cute_dsl_matmul/mma_04.png" class="mx-auto my-6" alt="Tensor cores diagram" />
+
+<p>No more bank conflicts and improvement in the peak fp32 performance as well! </p>
+
+<p>
+  This kernel now has <strong>8.34 TFLOP/s</strong> and we are at <strong>~71.1%</strong> of cuBLAS!
+</p>
+
+
+    </section>
 
 
 
     </article>
+
 
     <script>
       lucide.createIcons();
