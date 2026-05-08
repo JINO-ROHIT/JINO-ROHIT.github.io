@@ -156,15 +156,16 @@ def matmul_kernel(A: cute.Tensor, B: cute.Tensor, C: cute.Tensor, M, N, K):
         <p>On a first glance, it says that the compute and memory throughput to be extremely high, but how can this be possible? All we wrote was an extremely
             naive kernel in hardly 15 lines.
         </p>
-        <p> I want you to pay attention to two things-
-            1. first the line stating "The workload achieved 6% of this device's FP32 peak performance"
-            2. expand the section and check the individual breakdown for the compute throughput.
-        </p>
+        <p>I want you to pay attention to two things:</p>
+        <ol class="list-decimal list-inside space-y-2 ml-4">
+          <li>The line stating <strong>"The workload achieved 6% of this device's FP32 peak performance"</strong></li>
+          <li>Expand the section and check the individual breakdown for the <strong>compute throughput.</strong></li>
+        </ol>
 
         <img src="artifacts/cute_dsl_matmul/naive_matmul_02.png" class="mx-auto my-4" />
 
         <p> Oh, what's this?
-          From the docs, we get "The LSU pipeline issues load, store, atomic, and reduction instructions to the L1TEX unit for global, local, and shared memory"
+          From the docs, we get <strong>The LSU pipeline issues load, store, atomic, and reduction instructions to the L1TEX unit for global, local, and shared memory</strong>
           And that's 98% of our compute throughput! This means the warp scheduler is almost constantly issuing load/store instructions and is hardly using any of
           our compute units.
         </p>
@@ -177,18 +178,17 @@ def matmul_kernel(A: cute.Tensor, B: cute.Tensor, C: cute.Tensor, M, N, K):
           Kernel 2 - MMA Tensor Cores
         </h2>
 
-        <h3 class="text-xl font-semibold text-gray-800 mt-4">How CUDA Cores vs Tensor Cores Work</h3>
 
-        <h3 class="text-xl font-semibold text-gray-800">CUDA Cores: Element by Element</h3>
+        <h3 class="font-semibold text-gray-800">CUDA Cores: Element by Element</h3>
         <p>
-          A CUDA core executes one instruction on one piece of data per clock cycle. When you compute <code class="inline-code">c = a * b + c</code>, 
+          A CUDA core executes one instruction on one piece of data per clock cycle. When you compute <code>c = a * b + c</code>, 
           it's a fused multiply-add (FMA) on a single number.
         </p>
         <p>
           To add two vectors of size 32, you need 32 CUDA cores working in parallel - each adding one pair of elements simultaneously.
         </p>
 
-        <h3 class="text-xl font-semibold text-gray-800 mt-6">Tensor Cores: Whole Matrix at Once</h3>
+        <h3 class="font-semibold text-gray-800 mt-6">Tensor Cores: Whole Matrix at Once</h3>
         <p>
           Tensor cores are built for <strong>matrix multiply-accumulate</strong>: \( D = A \times B + C \), 
           where A, B, C, and D are matrices.
@@ -199,7 +199,7 @@ def matmul_kernel(A: cute.Tensor, B: cute.Tensor, C: cute.Tensor, M, N, K):
 
         <img src="artifacts/tensor_cores.png" class="mx-auto my-6" alt="Tensor cores diagram" />
 
-        <p>MMA instructions work at a warp-level, i.e. 32 threads in a warp work together to compute one small GEMM. So you need to think of all the 32 threads
+        <p>MMA Instructions provided by CUDA is a way to program these Tensor Cores. MMA instructions work at a warp-level, i.e. 32 threads in a warp work together to compute one small GEMM. So you need to think of all the 32 threads
           as a single unit of compute. The hardware expects A, B, and C fragments to be distributed across 32 threads in a very specific layout. 
           Thread 0 might hold certain rows and columns of A, thread 1 might hold others etc and this depends on the specific instruction you are using.
         </p>
@@ -234,9 +234,12 @@ def matmul_kernel(A: cute.Tensor, B: cute.Tensor, C: cute.Tensor, M, N, K):
 
 <img src="artifacts/cute_dsl_matmul/mma_01.png" class="mx-auto my-6" alt="Tensor cores diagram" />
 
-<p>See how thread 0 holds 
-  row 0 col 0 and col 1, row 0 col 8 and col 9.
-  row 8 col 0 and col 1, row 0 col 8 and col 9.
+<p>
+  For example, thread 0 holds four pairs from matrix A:
+  <br />
+  \((0,0)\), \((0,1)\), \((0,8)\), \((0,9)\)
+  <br />
+  \((8,0)\), \((8,1)\), \((8,8)\), \((8,9)\)
 </p>
 
 <p>The docs also gives a code snippet on how to map each thread's value, but we don't need to know all that, because the mma instruction is going to handle
@@ -366,8 +369,16 @@ cute.copy(c_copy_atom, tCrC, tCgC)
           Kernel 3 - Fixing Bank Conflicts!
         </h2>
 
-        <p>The only change is how we create strides for the shared memory layout in the host function.</p>
-        <p>The change is as simple as adding a little padding to each shared-memory (smem) layout we create for A and B.</p>
+        <p>Bank conflicts occur in shared memory and it has very different properties compared to global memory.</p>
+        <p>SMEM is organized into 32 banks, each bank being 32 bit wide.</p>
+
+        <img src="artifacts/cute_dsl_matmul/smem.png" class="mx-auto my-4" />
+
+        <p>Threads in a warp must not access different addresses within the same bank. Otherwise, those requests are serialized across multiple cycles.</p>
+        <p>This situation is known as a bank conflict. If N threads access different addresses of the same bank, the result is an N-way bank conflict and the warp's memory request takes N cycles to complete.</p>
+        <img src="artifacts/cute_dsl_matmul/bank_conflict.png" class="mx-auto my-4" />
+
+        <p>The easiest way to fix this is to add some padding to change the layout of the addresses.</p>
 
         <pre class="line-numbers">
 <code class="language-python">
@@ -395,6 +406,7 @@ def sgemm_host(a: cute.Tensor,
 </code>
 </pre>
 
+
 <img src="artifacts/cute_dsl_matmul/mma_04.png" class="mx-auto my-6" alt="Tensor cores diagram" />
 
 <p>No more bank conflicts, and improved peak FP32 performance as well.</p>
@@ -403,6 +415,180 @@ def sgemm_host(a: cute.Tensor,
   This kernel now has <strong>8.34 TFLOP/s</strong> and we are at <strong>~71.1%</strong> of cuBLAS!
 </p>
 
+
+    </section>
+
+    <section class="space-y-4 font-serif">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Kernel 4 - Pipelining with cp.async
+        </h2>
+
+        <p>
+          Usually, data transfers from global memory to shared memory are slower than performing the actual arithmetic operation. During this time, all the threads
+          are stalled/idle waiting for data and this kills our performance. We need a way to hide this latency. We use a technique called pipelining where we try to overlap the data transfers along with computation.
+        </p>
+        
+        <p>
+          The idea is while tensor cores compute on the current tile, we asynchronously load the next tile from global memory into another shared-memory stage.
+        </p>
+
+        <img src="artifacts/cute_dsl_matmul/pipeline_1.png" class="mx-auto my-6" alt="Tensor cores diagram" />
+
+        <p>
+          So instead of first loading everything into the shared memory, we can prefetch N tiles, perform a MMA operation, fetch another tile, perform another
+          MMA operation and so on. This process is asynchronous so all of them happen at the same time! 
+        </p>
+
+
+        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">Pipeline setup (3 stages)</h3>
+        <p>
+          We choose a 3-stage shared-memory pipeline and keep the same CTA/MMA tile sizes.
+        </p>
+<pre class="line-numbers">
+<code class="language-python">
+num_stages = 3
+cta_tiler = (128, 128, 8)
+mma_tiler = (16, 16)
+</code>
+</pre>
+        <p>
+          one stage is being consumed by MMA, one stage is ready next, and one stage is available for incoming async copies.
+          This means that we need to allocate 3x more space for the shared memory but this is usually fine.
+        </p>
+
+
+        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">1) Tile mapping and per-thread partitions</h3>
+        <p>
+          As before, we tile the matrices A and B. Then each thread gets its copy partitions for global-to-shared movement.
+        </p>
+<pre class="line-numbers">
+<code class="language-python">
+tid_x, _, _ = cute.arch.thread_idx()
+bid_x, bid_y, _ = cute.arch.block_idx()
+tiler_coord = (bid_x, bid_y, None)
+
+gA = cute.local_tile(A, cta_tiler, tiler_coord, proj=(1, None, 1))
+gB = cute.local_tile(B, cta_tiler, tiler_coord, proj=(None, 1, 1))
+gC = cute.local_tile(C, cta_tiler, tiler_coord, proj=(1, 1, None))
+
+smem = cutlass.utils.SmemAllocator()
+sA = smem.allocate_tensor(cutlass.Float32, smem_layout_a, 16)
+sB = smem.allocate_tensor(cutlass.Float32, smem_layout_b, 16)
+
+thr_copy_a = tiled_copy_a.get_slice(tid_x)
+thr_copy_b = tiled_copy_b.get_slice(tid_x)
+tAgA = thr_copy_a.partition_S(gA); tAsA = thr_copy_a.partition_D(sA)
+tBgB = thr_copy_b.partition_S(gB); tBsB = thr_copy_b.partition_D(sB)
+</code>
+</pre>
+
+        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">2) Prologue: prefetch global to shared</h3>
+        <p>
+          Before compute starts, we prefill `stage - 1` tiles into the shared memory.
+          This gives compute something ready to consume immediately.
+        </p>
+<pre class="line-numbers">
+<code class="language-python">
+smem_pipe_depth = cute.size(tAsA, mode=[3])   # 3 stages
+num_tiles_k = cute.size(tAgA, mode=[3])
+gmem_pipe_read = cutlass.Int32(0)
+
+for pipe in range(0, smem_pipe_depth - 1, unroll_full=True):
+    cute.copy(tiled_copy_a, tAgA[None, None, None, gmem_pipe_read], tAsA[None, None, None, pipe])
+    cute.copy(tiled_copy_b, tBgB[None, None, None, gmem_pipe_read], tBsB[None, None, None, pipe])
+    cute.arch.cp_async_commit_group()
+    gmem_pipe_read += 1
+</code>
+</pre>
+
+        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">3) Build MMA fragments and initialize pipe pointers</h3>
+        <p>
+          We create A/B/C MMA fragments, zero the accumulator, then initialize which shared stage to read from and which stage to write next.
+        </p>
+<pre class="line-numbers">
+<code class="language-python">
+thr_mma = tiled_mma.get_slice(tid_x)
+tCsA = thr_mma.partition_A(sA)
+tCsB = thr_mma.partition_B(sB)
+tCgC = thr_mma.partition_C(gC)
+
+tCrA = tiled_mma.make_fragment_A(tCsA[None, None, None, 0])
+tCrB = tiled_mma.make_fragment_B(tCsB[None, None, None, 0])
+tCrC = tiled_mma.make_fragment_C(tCgC)
+tCrC.fill(0.0)
+
+smem_pipe_read = cutlass.Int32(0)
+smem_pipe_write = cutlass.Int32(smem_pipe_depth - 1)
+</code>
+</pre>
+
+        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">4) Mainloop: overlap memory and compute</h3>
+        <p>
+          This is the core pipeline. We keep tensor-core compute running while issuing async loads for the next tile.
+        </p>
+<pre class="line-numbers">
+<code class="language-python">
+for _ in range(num_tiles_k, unroll_full=False):
+    for mma_k_idx in range(num_mma_k, unroll_full=True):
+        if mma_k_idx == num_mma_k - 1:
+            cute.arch.cp_async_wait_group(smem_pipe_depth - 2)
+            cute.arch.barrier()
+
+        mma_k_next = (mma_k_idx + 1) % num_mma_k
+        cute.autovec_copy(tCsA_[None, None, mma_k_next], tCrA[None, None, mma_k_next])
+        cute.autovec_copy(tCsB_[None, None, mma_k_next], tCrB[None, None, mma_k_next])
+
+        if mma_k_idx == 0:
+            cute.copy(tiled_copy_a, tAgA[None, None, None, gmem_pipe_read], tAsA[None, None, None, smem_pipe_write])
+
+        cute.gemm(tiled_mma, tCrC, tCrA[None, None, mma_k_idx], tCrB[None, None, mma_k_idx], tCrC)
+
+        if mma_k_idx == 0:
+            cute.copy(tiled_copy_b, tBgB[None, None, None, gmem_pipe_read], tBsB[None, None, None, smem_pipe_write])
+            cute.arch.cp_async_commit_group()
+</code>
+</pre>
+
+        <p>
+          While the current tile is being computed, the next tile is being loaded, and so on.
+        </p>
+        <p>
+          <code class="inline-code">cp_async_wait_group(N)</code>
+          waits until N groups are complete. This function blocks execution until the specified number of previously committed cp.async-groups have completed their memory transfers.
+        </p>
+
+
+        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">5) Epilogue and store</h3>
+        <p>
+          The final stage where we apply any transformation if needed, synchronize and then write back to C.
+        </p>
+<pre class="line-numbers">
+<code class="language-python">
+cute.arch.cp_async_wait_group(0)
+cute.arch.barrier()
+tCrC.store(epilogue_op(tCrC.load()))
+
+c_copy_atom = cute.make_copy_atom(cute.nvgpu.CopyUniversalOp(), cutlass.Float32)
+cute.copy(c_copy_atom, tCrC, tCgC)
+</code>
+</pre>
+
+
+<p>I was a bit surprised when i first saw that the kernel did worse than just the MMA kernel</p>
+<p>
+  This kernel gives <strong>7.40 TFLOP/s</strong> and is slower than the previous kernel. Profiling this was very important to understand why.
+</p>
+
+<img src="artifacts/cute_dsl_matmul/pipeline_2.png" class="mx-auto my-6" alt="Tensor cores diagram" />
+
+<p>Aha, even though we managed to hide latency, we actually introduced lots of uncoalesced memory accesses and this in fact is making it slower than our
+  way simpler kernel we had.
+</p>
+
+<p>And if you want to directly inspect which source code line is having the major impact, you can directly navigate to the Source section.</p>
+<img src="artifacts/cute_dsl_matmul/pipeline_3.png" class="mx-auto my-6" alt="Tensor cores diagram" />
+
+<p>Take a look at the highlighted section, it is in fact the tiled copy from GMEM to SMEM that is either bank conflicted or has a lot of uncoalesced accesses.</p>
 
     </section>
 
