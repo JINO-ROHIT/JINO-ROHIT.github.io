@@ -47,6 +47,14 @@
   .line-numbers .line-numbers-rows {
     font-size: 12px;
   }
+
+  figcaption {
+    text-align: center;
+    font-size: 0.85rem;
+    color: #6b7280;
+    margin-top: 0.5rem;
+    font-style: italic;
+  }
 </style>
 
   </head>
@@ -76,11 +84,46 @@
           on par with cuBLAS and we will walk through every bit of optimization involved. 
         </p>
 
+        <div class="my-6 overflow-x-auto">
+          <table class="w-full text-sm border-collapse">
+            <thead>
+              <tr class="border-b-2 border-gray-300">
+                <th class="text-left py-3 px-4 font-semibold text-gray-700">Kernel</th>
+                <th class="text-right py-3 px-4 font-semibold text-gray-700">TFLOP/s</th>
+                <th class="text-right py-3 px-4 font-semibold text-gray-700">vs cuBLAS %</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="border-b border-gray-200 hover:bg-orange-100">
+                <td class="py-2 px-4">Naive Matmul</td><td class="text-right py-2 px-4">1.33</td><td class="text-right py-2 px-4">11.5%</td>
+              </tr>
+              <tr class="border-b border-gray-200 hover:bg-orange-100">
+                <td class="py-2 px-4">Tiled MMA</td><td class="text-right py-2 px-4">7.37</td><td class="text-right py-2 px-4">64.1%</td>
+              </tr>
+              <tr class="border-b border-gray-200 hover:bg-orange-100">
+                <td class="py-2 px-4">MMA + Bank Conflict Fix</td><td class="text-right py-2 px-4">8.34</td><td class="text-right py-2 px-4">72.5%</td>
+              </tr>
+              <tr class="border-b border-gray-200 hover:bg-orange-100">
+                <td class="py-2 px-4">Pipelining</td><td class="text-right py-2 px-4">7.40</td><td class="text-right py-2 px-4">64.3%</td>
+              </tr>
+              <tr class="border-b border-gray-200 hover:bg-orange-100">
+                <td class="py-2 px-4">Pipelining + Coalesced</td><td class="text-right py-2 px-4">11.17</td><td class="text-right py-2 px-4">97.2%</td>
+              </tr>
+              <tr class="border-b-2 border-gray-300 bg-orange-50 font-semibold">
+                <td class="py-2 px-4">Pipelining + Col-Major</td><td class="text-right py-2 px-4">11.82</td><td class="text-right py-2 px-4">102.8%</td>
+              </tr>
+              <tr class="border-b border-gray-200 bg-orange-50 italic">
+                <td class="py-2 px-4">cuBLAS (baseline)</td><td class="text-right py-2 px-4">11.50</td><td class="text-right py-2 px-4">100.0%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
         <p>
             You will find all the code available on my <a href="https://github.com/JINO-ROHIT/kernels/tree/main/cute_dsl/matmul" class="text-gray-900 font-semibold hover:text-orange-600 transition">Github*</a>
         </p>
 
-        <p style="font-size: 0.9rem;"><strong>*All experiments are performed on an RTX 4060 Ti GPU.</strong></p>
+        <p style="font-size: 0.9rem;"><strong>*This is still a work in progress.</strong></p>
       </section>
 
       <section class="space-y-4">
@@ -89,9 +132,11 @@
         </h2>
 
         <p>
-          CuTe DSL is a Python-based domain-specific language (DSL) designed for dynamic compilation of high-performance GPU kernels. 
-          It evolved from the C++ CUTLASS library and is now available as a decorator-based DSL.
-          You can read more on the official documentation page.
+          CuTe DSL is the Python DSL built on top of CUTLASS. It lets us describe tiles, layouts, copies, and MMA-style computation at a much higher level than handwritten CUDA, while still exposing the pieces that matter for performance.
+        </p>
+
+        <p>
+          In practice, that means we can reason in terms of CTA tiles, warp tiles, shared-memory layouts, and copy partitions instead of hand-deriving every thread mapping ourselves.
         </p>
 
 
@@ -113,7 +158,7 @@
         <img src="artifacts/matmul_step3.png" class="mx-auto my-4" />
         <img src="artifacts/matmul_step4.png" class="mx-auto my-4" />
 
-        <p>Now in code</p>
+        <p class="font-medium mt-6">Implementation:</p>
 
 
 <pre class="line-numbers">
@@ -144,11 +189,11 @@ def matmul_kernel(A: cute.Tensor, B: cute.Tensor, C: cute.Tensor, M, N, K):
 
         <p>
             This kernel has <strong>1.33 TFLOP/s</strong> with a kernel execution time of <strong>13.29 ms</strong>.
-            This is roughly ~11% of what pytorch cuBLAS gives us.
+            This is roughly ~11% of what cuBLAS gives us.
         </p>
 
         <p>
-            Now let's turn our attention to what the ncu-ui profiler has to say about this kernel.
+            Now let's turn our attention to what the NCU profiler has to say about this kernel.
         </p>
 
         <img src="artifacts/cute_dsl_matmul/naive_matmul_01.png" class="mx-auto my-4" />
@@ -156,10 +201,10 @@ def matmul_kernel(A: cute.Tensor, B: cute.Tensor, C: cute.Tensor, M, N, K):
         <p>On a first glance, it says that the compute and memory throughput to be extremely high, but how can this be possible? All we wrote was an extremely
             naive kernel in hardly 15 lines.
         </p>
-        <p>I want you to pay attention to two things:</p>
-        <ol class="list-decimal list-inside space-y-2 ml-4">
+        <p class="font-medium">Pay attention to two things:</p>
+        <ol class="list-decimal list-inside space-y-2 ml-4 mt-2">
           <li>The line stating <strong>"The workload achieved 6% of this device's FP32 peak performance"</strong></li>
-          <li>Expand the section and check the individual breakdown for the <strong>compute throughput.</strong></li>
+          <li>Expand the section and check the individual breakdown for the <strong>compute throughput</strong></li>
         </ol>
 
         <img src="artifacts/cute_dsl_matmul/naive_matmul_02.png" class="mx-auto my-4" />
@@ -175,11 +220,19 @@ def matmul_kernel(A: cute.Tensor, B: cute.Tensor, C: cute.Tensor, M, N, K):
 
     <section class="space-y-4 font-serif">
         <h2 class="text-2xl font-serif font-bold text-gray-950">
-          Kernel 2 - MMA Tensor Cores
+          Kernel 2 - Tiled MMA
         </h2>
 
+        <p>
+        The first big jump comes from tiling the problem. Instead of having every thread access data directly from global memory, we move tiles of A and B into shared memory, partition them across threads, and accumulate into register fragments.
+        </p>
 
-        <h3 class="font-semibold text-gray-800">CUDA Cores: Element by Element</h3>
+        <p>
+          One terminology note: in this post I use “MMA” in the CuTe sense of warp-cooperative matrix multiply-accumulate structure. We are not in fact using tensor cores rather better tiling and register-level accumulation.
+        </p>
+
+
+        <!-- <h3 class="font-semibold text-gray-800">CUDA Cores: Element by Element</h3>
         <p>
           A CUDA core executes one instruction on one piece of data per clock cycle. When you compute <code>c = a * b + c</code>, 
           it's a fused multiply-add (FMA) on a single number.
@@ -246,7 +299,7 @@ def matmul_kernel(A: cute.Tensor, B: cute.Tensor, C: cute.Tensor, M, N, K):
   all that hard stuff for us.
 </p>
 
-<p>Now that we understand why tensor cores matter, let's break the kernel into the most important parts.</p>
+<p>Now that we understand why tensor cores matter, let's break the kernel into the most important parts.</p> -->
 
 <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">1) Map each block and thread to a tile</h3>
 <p>This decides <em>which</em> block of A, B, and C this CTA works on.</p>
@@ -284,7 +337,6 @@ tBsB = thr_copy_b.partition_D(sB)
 </pre>
 
 <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">3) Build MMA fragments (register tiles)</h3>
-<p>Tensor core instructions read fragments in specific layouts, so we create those per-thread fragments next.</p>
 <pre class="line-numbers">
 <code class="language-python">
 thr_mma = tiled_mma.get_slice(tid_x)
@@ -304,8 +356,8 @@ tCrC.fill(0.0)
 
 <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">4) Main K loop</h3>
 <p>
-  For each K tile: we first load from global to shared, then synchronize before we can start loading into the register fragments.
-  Once the tile is in registers, we run the tensor-core GEMM and then move to the next tile.
+  For each K tile: we first load from global to shared memory, and then into the register fragments.
+  Once the tile is in registers, we run the GEMM and then move to the next tile.
 </p>
 <pre class="line-numbers">
 <code class="language-python">
@@ -360,7 +412,7 @@ cute.copy(c_copy_atom, tCrC, tCgC)
 
         <img src="artifacts/cute_dsl_matmul/mma_03.png" class="mx-auto my-4" />
 
-        <p> From the recommendations, the most taxing one seems to be bank conflicts, so why don't we fix that with some padding?
+        <p> From the recommendations, the most taxing one seems to be bank conflicts, so why don't we try to fix that?
         </p>
     </section>
 
@@ -420,7 +472,7 @@ def sgemm_host(a: cute.Tensor,
 
     <section class="space-y-4 font-serif">
         <h2 class="text-2xl font-serif font-bold text-gray-950">
-          Kernel 4 - Pipelining with cp.async
+          Kernel 4 - Multistage Pipelining with cp.async
         </h2>
 
         <p>
@@ -429,7 +481,7 @@ def sgemm_host(a: cute.Tensor,
         </p>
         
         <p>
-          The idea is while tensor cores compute on the current tile, we asynchronously load the next tile from global memory into another shared-memory stage.
+          The idea is while we compute on the current tile, we asynchronously load the next tile from global memory into another shared-memory stage.
         </p>
 
         <img src="artifacts/cute_dsl_matmul/pipeline_1.png" class="mx-auto my-6" alt="Tensor cores diagram" />
@@ -524,7 +576,7 @@ smem_pipe_write = cutlass.Int32(smem_pipe_depth - 1)
 
         <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">4) Mainloop: overlap memory and compute</h3>
         <p>
-          This is the core pipeline. We keep tensor-core compute running while issuing async loads for the next tile.
+          This is the core pipeline. We keep the compute running while issuing async loads for the next tile.
         </p>
 <pre class="line-numbers">
 <code class="language-python">
@@ -560,7 +612,7 @@ for _ in range(num_tiles_k, unroll_full=False):
 
         <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">5) Epilogue and store</h3>
         <p>
-          The final stage where we apply any transformation if needed, synchronize and then write back to C.
+          The final stage where we apply any transformation if needed and then write back to C.
         </p>
 <pre class="line-numbers">
 <code class="language-python">
@@ -574,7 +626,7 @@ cute.copy(c_copy_atom, tCrC, tCgC)
 </pre>
 
 
-<p>I was a bit surprised when i first saw that the kernel did worse than just the MMA kernel</p>
+<p>I was a bit surprised when i first saw that the kernel did worse than just the Tiled MMA kernel</p>
 <p>
   This kernel gives <strong>7.40 TFLOP/s</strong> and is slower than the previous kernel. Profiling this was very important to understand why.
 </p>
@@ -589,6 +641,88 @@ cute.copy(c_copy_atom, tCrC, tCgC)
 <img src="artifacts/cute_dsl_matmul/pipeline_3.png" class="mx-auto my-6" alt="Tensor cores diagram" />
 
 <p>Take a look at the highlighted section, it is in fact the tiled copy from GMEM to SMEM that is either bank conflicted or has a lot of uncoalesced accesses.</p>
+
+    </section>
+
+    <section class="space-y-4 font-serif">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Kernel 5 - Warp tiling and Coalesced Epilogue
+        </h2>
+
+        <p>
+          In this kernel, we introduce warp tiling. Instead of treating the full 256-thread CTA as one flat compute group, we divide the CTA tile into warp-owned subtiles. The CTA still computes a 128 x 128
+          output tile, but now each warp owns a 32 x 64 region.
+        </p>
+
+        <p>We also improve the copy layouts by vectorizing the store and load. 
+        </p>
+
+        <p>There is also a very important improvement in the epilogue. In the previous kernel, accumulators are written more directly from registers to global memory. 
+          The problem is that accumulator fragments are arranged for compute but not for efficient global stores. 
+          Here, we introduce an intermediate shared-memory tensor sC as a staging area. Each warp first writes its accumulator fragment into shared memory, and then the threads cooperatively reload and store C in a coalesced global-memory
+          pattern.</p>
+
+        <p>
+          This kernel gives a massive <strong>11.17 TFLOP/s</strong> and we are at 97.2% of the cuBLAS performance!
+        </p>
+
+        <img src="artifacts/cute_dsl_matmul/pipelin_4.png" class="mx-auto my-6" alt="Tensor cores diagram" />
+
+        <p>Amazing, this kernel uses 52% of the peak fp32 performance and the compute breakdown actually shows that the FMA piepline is the most busy compared
+          to the previous kernels where it was always being stalled by instructions.
+        </p>
+    </section>
+
+    <section class="space-y-4 font-serif">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Kernel 5 - Using a Column Major Layout
+        </h2>
+
+        <p>
+          In this kernel, we use a column major format for matrix B. The entire compute pipeline remains the same but by using a column major format for B, 
+          we improve two things - better coalesced loads for B along with 128 bit vectorized copies for B.
+        </p>
+
+
+        <p>
+          This kernel finally outperforms cuBLAS with <strong>11.82 TFLOP/s</strong>, that is  102% of the cuBLAS performance!
+        </p>
+
+        <img src="artifacts/cute_dsl_matmul/pipeline_5.png" class="mx-auto my-6" alt="Tensor cores diagram" />
+
+        <p>By making this simple change, we also see the overall compute performance has also improved with peak fp32 performance climbing to 62%.
+        </p>
+
+    </section>
+
+    <section class="space-y-4 font-serif">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Next Steps
+        </h2>
+
+        <ul class="list-disc list-inside space-y-2 ml-4">
+          <li>Use tensor cores to accelerate computation (currently using FPU MMA).</li>
+          <li>Introduce predicates to handle edge cases for all matrix sizes.</li>
+          <li>Fix remaining uncoalesced memory accesses.</li>
+          <li>Explore other segments of the NCU profiler.</li>
+          <li>Map PTX instructions to verify assumptions.</li>
+        </ul>
+
+    </section>
+
+
+        <section class="space-y-4 font-serif">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          References
+        </h2>
+
+        <p>A lot of this work has been inspired from these resources-</p>
+        <ul class="list-disc list-inside space-y-2 ml-4 mt-2">
+          <li><a href="https://github.com/NVIDIA/cutlass/blob/main/examples/python/CuTeDSL/ampere/sgemm.py" target="_blank" class=" hover:underline">CUTASS CuTe DSL SGEMM Example</a></li>
+          <li><a href="https://siboehm.com/articles/22/CUDA-MMM" target="_blank" class="hover:underline">Siboem CUDA Matrix Multiplication Optimization</a></li>
+          <li><a href="https://www.aleksagordic.com/blog/matmul" target="_blank" class="hover:underline">Aleksa Gordic Matmul Optimization</a></li>
+          <li><a href="https://salykova.github.io/sgemm-gpu" target="_blank" class="hover:underline">SGEMM on GPU</a></li>
+        </ul>
 
     </section>
 
