@@ -84,6 +84,13 @@
           on par with cuBLAS and we will walk through every bit of optimization involved. 
         </p>
 
+        <p>
+            You will find all the code available on my <a href="https://github.com/JINO-ROHIT/kernels/tree/main/cute_dsl/matmul" class="text-gray-900 font-semibold hover:text-orange-600 transition">Github*</a>
+        </p>
+
+        <p style="font-size: 0.9rem;"><strong>*This is still a work in progress.</strong></p>
+
+
         <div class="my-6 overflow-x-auto">
           <table class="w-full text-sm border-collapse">
             <thead>
@@ -113,17 +120,11 @@
                 <td class="py-2 px-4">Pipelining + Col-Major</td><td class="text-right py-2 px-4">11.82</td><td class="text-right py-2 px-4">102.8%</td>
               </tr>
               <tr class="border-b border-gray-200 bg-orange-50 italic">
-                <td class="py-2 px-4">cuBLAS (baseline)</td><td class="text-right py-2 px-4">11.50</td><td class="text-right py-2 px-4">100.0%</td>
+                <td class="py-2 px-4">Pytorch cuBLAS (baseline)</td><td class="text-right py-2 px-4">11.50</td><td class="text-right py-2 px-4">100.0%</td>
               </tr>
             </tbody>
           </table>
         </div>
-
-        <p>
-            You will find all the code available on my <a href="https://github.com/JINO-ROHIT/kernels/tree/main/cute_dsl/matmul" class="text-gray-900 font-semibold hover:text-orange-600 transition">Github*</a>
-        </p>
-
-        <p style="font-size: 0.9rem;"><strong>*This is still a work in progress.</strong></p>
       </section>
 
       <section class="space-y-4">
@@ -336,9 +337,16 @@ tBsB = thr_copy_b.partition_D(sB)
 </code>
 </pre>
 
-<h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">3) Build MMA fragments (register tiles)</h3>
+<h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">3) Build a 1x1x1 MMA Atom</h3>
 <pre class="line-numbers">
 <code class="language-python">
+mma_op = cute.nvgpu.MmaUniversalOp(cutlass.Float32)
+mma_atoms_layout = cute.make_layout((mma_m, mma_n, 1), stride=(mma_n, 1, 0))
+tiled_mma = cute.make_tiled_mma(
+    mma_op,
+    atom_layout_mnk=mma_atoms_layout,
+)
+
 thr_mma = tiled_mma.get_slice(tid_x)
 tCsA = thr_mma.partition_A(sA)
 tCsB = thr_mma.partition_B(sB)
