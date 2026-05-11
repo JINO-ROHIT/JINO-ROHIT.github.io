@@ -662,9 +662,6 @@ cute.copy(c_copy_atom, tCrC, tCgC)
           output tile, but now each warp owns a 32 x 64 region.
         </p>
 
-        <p>We also improve the copy layouts by vectorizing the store and load. 
-        </p>
-
         <p>There is also a very important improvement in the epilogue. In the previous kernel, accumulators are written more directly from registers to global memory. 
           The problem is that accumulator fragments are arranged for compute but not for efficient global stores. 
           Here, we introduce an intermediate shared-memory tensor sC as a staging area. Each warp first writes its accumulator fragment into shared memory, and then the threads cooperatively reload and store C in a coalesced global-memory
@@ -683,7 +680,7 @@ cute.copy(c_copy_atom, tCrC, tCgC)
 
     <section class="space-y-4 font-serif">
         <h2 class="text-2xl font-serif font-bold text-gray-950">
-          Kernel 5 - Using a Column Major Layout
+          Kernel 6 - Using a Column Major Layout
         </h2>
 
         <p>
@@ -709,7 +706,7 @@ cute.copy(c_copy_atom, tCrC, tCgC)
         </h2>
 
         <ul class="list-disc list-inside space-y-2 ml-4">
-          <li>Use tensor cores to accelerate computation (currently using FPU MMA).</li>
+          <li>Use tensor cores to accelerate computation (currently using a trivial 1x1x1 MMA atom).</li>
           <li>Introduce predicates to handle edge cases for all matrix sizes.</li>
           <li>Fix remaining uncoalesced memory accesses.</li>
           <li>Explore other segments of the NCU profiler.</li>
