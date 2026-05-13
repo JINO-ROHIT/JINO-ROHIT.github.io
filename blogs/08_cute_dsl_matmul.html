@@ -548,7 +548,7 @@ mma_tiler = (16, 16)
         </p>
 
 
-        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">11. Tile mapping and per-thread partitions</h3>
+        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">1. Tile mapping and per-thread partitions</h3>
         <p>
           As before, we tile the matrices A and B. Then each thread gets its copy partitions for global-to-shared movement.
         </p>
@@ -573,7 +573,7 @@ tBgB = thr_copy_b.partition_S(gB); tBsB = thr_copy_b.partition_D(sB)
 </code>
 </pre>
 
-        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">2. Prologue: prefetch global to shared</h3>
+        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">2. Prologue - prefetch global to shared</h3>
         <p>
           Before compute starts, we prefill `stage - 1` tiles into the shared memory.
           This gives compute something ready to consume immediately.
@@ -613,7 +613,7 @@ smem_pipe_write = cutlass.Int32(smem_pipe_depth - 1)
 </code>
 </pre>
 
-        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">4. Mainloop: overlap memory and compute</h3>
+        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">4. Mainloop - overlap memory and compute</h3>
         <p>
           This is the core pipeline. We keep the compute running while issuing async loads for the next tile.
         </p>
@@ -649,7 +649,7 @@ for _ in range(num_tiles_k, unroll_full=False):
         </p>
 
 
-        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">5) Epilogue and store</h3>
+        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">5. Epilogue and store</h3>
         <p>
           The final stage where we apply any transformation if needed and then write back to C.
         </p>
@@ -689,14 +689,83 @@ cute.copy(c_copy_atom, tCrC, tCgC)
         </h2>
 
         <p>
-          In this kernel, we introduce warp tiling. Instead of treating the full 256-thread CTA as one flat compute group, we divide the CTA tile into warp-owned subtiles. The CTA still computes a 128 x 128
-          output tile, but now each warp owns a 32 x 64 region.
+          In this kernel, we introduce warp tiling. Instead of treating the full 256-thread CTA as one flat compute group, we divide the CTA tile into warp-owned subtiles.
         </p>
 
-        <p>There is also a very important improvement in the epilogue. In the previous kernel, accumulators are written more directly from registers to global memory. 
-          The problem is that accumulator fragments are arranged for compute but not for efficient global stores. 
-          Here, we introduce an intermediate shared-memory tensor sC as a staging area. Each warp first writes its accumulator fragment into shared memory, and then the threads cooperatively reload and store C in a coalesced global-memory
-          pattern.</p>
+<pre class="line-numbers">
+<code class="language-python">
+cta_tiler = (128, 128, 8)
+warp_tiler = (32, 64, 8)
+wmma_tiler = (4, 8)
+</code>
+</pre>
+
+<img src="artifacts/cute_dsl_matmul/cta_warp_tile.png" class="mx-auto my-6" alt="Tensor cores diagram" />
+
+<p>The CTA still computes a 128 x 128 tile, but now each warp owns a 32 x 64 region.</p>
+
+
+<pre class="line-numbers">
+<code class="language-python">
+wrp_idm, wrp_idn = wrp_idx // num_warps_n, wrp_idx % num_warps_n
+warp_coord_A = ((None, None), wrp_idm, None, None)
+warp_coord_B = ((None, None), wrp_idn, None, None)
+warp_coord_C = ((None, None), wrp_idm, wrp_idn)
+wCsA = cute.tiled_divide(sA, (warp_m, warp_k))[warp_coord_A]
+wCsB = cute.tiled_divide(sB, (warp_n, warp_k))[warp_coord_B]
+wCsC_mma = cute.tiled_divide(sC, (warp_m, warp_n))[warp_coord_C]
+wCgC_mma = cute.tiled_divide(gC, (warp_m, warp_n))[warp_coord_C]
+</code>
+</pre>
+
+<br>
+
+<h3 class="text-2xl font-serif font-bold text-gray-950"> Lanes</h3>
+<p>A warp has 32 threads. You can think of lane as a thread within that warp numbered 0 to 31.</p>
+<p>In our code, the warp's 32 lanes are arranged logically as (4, 8)</p>
+
+<img src="artifacts/cute_dsl_matmul/lanes.png" class="mx-auto my-6" alt="Tensor cores diagram" />
+
+<p>For our second idea, the lane within the warp decide the thread's role inside the warp's tile</p>
+<p>So if warp picks which 32x64 tile, then the lane decides which part of the tile the thread exactly computes.</p>
+
+<pre class="line-numbers">
+<code class="language-python">
+thr_mma = tiled_warp_mma.get_slice(lne_idx)
+tCsA = thr_mma.partition_A(wCsA)
+tCsB = thr_mma.partition_B(wCsB)
+tCsC_mma = thr_mma.partition_C(wCsC_mma)
+tCgC_mma = thr_mma.partition_C(wCgC_mma)
+
+tCrA = tiled_warp_mma.make_fragment_A(tCsA[None, None, None, None, 0])
+tCrB = tiled_warp_mma.make_fragment_B(tCsB[None, None, None, None, 0])
+tCrC = tiled_warp_mma.make_fragment_C(tCgC_mma)
+tCrC.fill(0.0)
+</code>
+</pre>
+
+<p>Remember that a lane owns a fragment of the data, not a single value. This depends on the MMA tile we use.</p>
+
+<h3 class="text-2xl font-serif font-bold text-gray-950">An improved epilogue</h3>
+
+<p>There is also a very important improvement in the epilogue. In the previous kernel, accumulators are written more directly from registers to global memory. 
+  The problem is that accumulator fragments are arranged for compute but not for efficient global stores. 
+  Here, we introduce an intermediate shared-memory tensor sC as a staging area. Each warp first writes its accumulator fragment into shared memory.
+  We then make a new register tensor to make the final global store coalesced. 
+  We again read from this shared memory and then finally to the global memory.</p>
+
+<pre class="line-numbers">
+<code class="language-python">
+tCrC.store(epilogue_op(tCrC.load()))
+cute.autovec_copy(tCrC, tCsC_mma)
+cute.arch.sync_threads()
+tCrC_copy = cute.make_rmem_tensor_like(tCsC_copy)
+cute.autovec_copy(tCsC_copy, tCrC_copy)
+cute.copy(tiled_copy_C, tCrC_copy, tCgC_copy)
+</code>
+</pre>
+
+<br>
 
         <p>
           This kernel gives a massive <strong>11.17 TFLOP/s</strong> and we are at 97.2% of the cuBLAS performance!
@@ -715,8 +784,7 @@ cute.copy(c_copy_atom, tCrC, tCgC)
         </h2>
 
         <p>
-          In this kernel, we use a column major format for matrix B. The entire compute pipeline remains the same but by using a column major format for B, 
-          we improve two things - better coalesced loads for B along with 128 bit vectorized copies for B.
+          In this kernel, we use a column major format for matrix B. The entire compute pipeline remains the same but by using a column major format for B.
         </p>
 
 
