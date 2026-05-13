@@ -229,7 +229,7 @@ def matmul_kernel(A: cute.Tensor, B: cute.Tensor, C: cute.Tensor, M, N, K):
         </p>
 
         <p>
-          One terminology note: in this post I use “MMA” in the CuTe sense of warp-cooperative matrix multiply-accumulate structure. We are not in fact using tensor cores rather better tiling and register-level accumulation.
+          For this, we will use a trivial 1x1x1 MMA atom that uses FPU for matrix-multiple accumulate(MMA) operations. We are not using tensor cores here.
         </p>
 
 
@@ -302,7 +302,35 @@ def matmul_kernel(A: cute.Tensor, B: cute.Tensor, C: cute.Tensor, M, N, K):
 
 <p>Now that we understand why tensor cores matter, let's break the kernel into the most important parts.</p> -->
 
-<h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">1) Map each block and thread to a tile</h3>
+<h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">Create Copy Atoms on the host side</h3>
+<p>We create copy atoms for A and B with a specific thread value layout. For now each thread moves a single FP32 element. We will later see how to move 128 bit copy width ie 4 FP32 elements at once. </p>
+<pre class="line-numbers">
+<code class="language-python">
+thr_layout_a = cute.make_ordered_layout(shape=(threads // tile_k, tile_k), order=(1, 0))
+val_layout_a = cute.make_layout((1, 1))
+async_copy_atom_a = cute.make_copy_atom(
+    cute.nvgpu.CopyUniversalOp(),
+    cutlass.Float32,
+    num_bits_per_copy = a.element_type.width # 32 bits
+)
+tiled_copy_a = cute.make_tiled_copy_tv(async_copy_atom_a, thr_layout_a, val_layout_a) # do the same for B
+</code>
+</pre>
+
+<h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">Create the Tiled MMA</h3>
+<p>The tiled MMA requires 3 MNK layout, so we add 1 to the K dimension with a stride 0. </p>
+<pre class="line-numbers">
+<code class="language-python">
+mma_op = cute.nvgpu.MmaUniversalOp(cutlass.Float32)
+mma_atoms_layout = cute.make_layout((mma_m, mma_n, 1), stride=(mma_n, 1, 0))
+tiled_mma = cute.make_tiled_mma(
+    mma_op,
+    atom_layout_mnk=mma_atoms_layout,
+)
+</code>
+</pre>
+
+<h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">1. Map each block and thread to a tile</h3>
 <p>This decides <em>which</em> block of A, B, and C this CTA works on.</p>
 <pre class="line-numbers">
 <code class="language-python">
@@ -319,7 +347,7 @@ gC = cute.local_tile(C, cta_tiler, tiler_coord, proj=(1, 1, None))
   Think of this as assigning work: this block gets one tile of output C, and the matching tiles of A and B needed to compute it.
 </p>
 
-<h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">2) Create thread value partitions for each tile</h3>
+<h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">2. Create thread value partitions for each tile</h3>
 <p>For each thread index, we get a slice of the value it owns from the tv layout, and then apply it using partition on both source and destination.</p>
 <pre class="line-numbers">
 <code class="language-python">
@@ -337,7 +365,7 @@ tBsB = thr_copy_b.partition_D(sB)
 </code>
 </pre>
 
-<h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">3) Build a 1x1x1 MMA Atom</h3>
+<h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">3. Build a 1x1x1 MMA Atom</h3>
 <pre class="line-numbers">
 <code class="language-python">
 mma_op = cute.nvgpu.MmaUniversalOp(cutlass.Float32)
@@ -362,11 +390,14 @@ tCrC.fill(0.0)
   `tCrC` is the accumulator fragment in registers. This is where repeated MMA operations accumulate partial sums.
 </p>
 
-<h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">4) Main K loop</h3>
-<p>
-  For each K tile: we first load from global to shared memory, and then into the register fragments.
-  Once the tile is in registers, we run the GEMM and then move to the next tile.
-</p>
+<h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">4. Main K loop</h3>
+<p>For each K tile - </p>
+<ul class="list-disc list-inside space-y-2 ml-4">
+  <li>Load from global to shared memory</li>
+  <li>Load from shared memory into register fragments</li>
+  <li>Once the tile is in registers, run the GEMM</li>
+  <li>Move to the next tile</li>
+</ul>
 <pre class="line-numbers">
 <code class="language-python">
 num_tiles_k = cute.size(tAgA, mode=[3])
@@ -393,7 +424,7 @@ for tile_k_idx in range(num_tiles_k, unroll_full=False):
 </pre>
 
 
-<h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">5) Epilogue: store to C</h3>
+<h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">5. Epilogue - store to C</h3>
 <p>After accumulation, we can write results back.</p>
 <pre class="line-numbers">
 <code class="language-python">
@@ -517,7 +548,7 @@ mma_tiler = (16, 16)
         </p>
 
 
-        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">1) Tile mapping and per-thread partitions</h3>
+        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">11. Tile mapping and per-thread partitions</h3>
         <p>
           As before, we tile the matrices A and B. Then each thread gets its copy partitions for global-to-shared movement.
         </p>
@@ -542,7 +573,7 @@ tBgB = thr_copy_b.partition_S(gB); tBsB = thr_copy_b.partition_D(sB)
 </code>
 </pre>
 
-        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">2) Prologue: prefetch global to shared</h3>
+        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">2. Prologue: prefetch global to shared</h3>
         <p>
           Before compute starts, we prefill `stage - 1` tiles into the shared memory.
           This gives compute something ready to consume immediately.
@@ -561,7 +592,7 @@ for pipe in range(0, smem_pipe_depth - 1, unroll_full=True):
 </code>
 </pre>
 
-        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">3) Build MMA fragments and initialize pipe pointers</h3>
+        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">3. Build MMA fragments and initialize pipe pointers</h3>
         <p>
           We create A/B/C MMA fragments, zero the accumulator, then initialize which shared stage to read from and which stage to write next.
         </p>
@@ -582,7 +613,7 @@ smem_pipe_write = cutlass.Int32(smem_pipe_depth - 1)
 </code>
 </pre>
 
-        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">4) Mainloop: overlap memory and compute</h3>
+        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">4. Mainloop: overlap memory and compute</h3>
         <p>
           This is the core pipeline. We keep the compute running while issuing async loads for the next tile.
         </p>
