@@ -73,7 +73,7 @@
       <h1 class="font-serif text-4xl font-bold leading-tight text-gray-950">
         Outperforming cuBLAS on Ada Lovelace using CuTe DSL
       </h1>
-      <p class="text-sm text-gray-600 mt-4 italic">May 06, 2026 • 20 min read</p>
+      <p class="text-sm text-gray-600 mt-4 italic">May 15, 2026 • 20 min read</p>
     </header>
 
     <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
@@ -303,7 +303,7 @@ def matmul_kernel(A: cute.Tensor, B: cute.Tensor, C: cute.Tensor, M, N, K):
 <p>Now that we understand why tensor cores matter, let's break the kernel into the most important parts.</p> -->
 
 <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">Create Copy Atoms on the host side</h3>
-<p>We create copy atoms for A and B with a specific thread value layout. For now each thread moves a single FP32 element. We will later see how to move 128 bit copy width ie 4 FP32 elements at once. </p>
+<p>We create copy atoms for A and B with a specific thread value layout. For now each thread moves a single FP32 element. We will later see how to move 128 bit copy width ie. 4 FP32 elements at once. </p>
 <pre class="line-numbers">
 <code class="language-python">
 thr_layout_a = cute.make_ordered_layout(shape=(threads // tile_k, tile_k), order=(1, 0))
@@ -343,9 +343,6 @@ gB = cute.local_tile(B, cta_tiler, tiler_coord, proj=(None, 1, 1))
 gC = cute.local_tile(C, cta_tiler, tiler_coord, proj=(1, 1, None))
 </code>
 </pre>
-<p>
-  Think of this as assigning work: this block gets one tile of output C, and the matching tiles of A and B needed to compute it.
-</p>
 
 <h3 class="text-xl font-serif font-semibold text-gray-950 mt-4">2. Create thread value partitions for each tile</h3>
 <p>For each thread index, we get a slice of the value it owns from the tv layout, and then apply it using partition on both source and destination.</p>
