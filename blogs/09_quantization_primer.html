@@ -239,7 +239,7 @@
 
         <ul class="list-disc pl-6 space-y-2">
           <li>
-            <strong>Gradient underflow</strong>: Values that are too small (like 8.9 × 10^-10) 
+            <strong>Gradient underflow</strong>: Values that are too small (like 8.9 x 10^-10) 
             can't be represented and get rounded down to zero, causing the model to stop learning.
           </li>
           <li>
@@ -286,13 +286,85 @@
         </p>
 
         <p>
-          But here's the thing: for deep learning, having a wide <strong>range</strong> 
+          For deep learning, having a wide <strong>range</strong> 
           matters more than having ultra-fine precision. The gradients during training 
           can vary wildly in magnitude, and bf16's fp32-like exponent helps avoid 
-          the underflow problems that fp16 faces.
+          the gradient problems that fp16 faces.
         </p>
 
+        <h3 class="text-xl font-bold text-gray-800 mt-6 mb-3">A quick review of the formats</h3>
+        <p>
+          Here's a quick comparison of the three formats we've covered:
+        </p>
+
+        <table class="w-full mt-6 border-collapse text-sm">
+          <thead>
+            <tr class="border-b-2 border-gray-400">
+              <th class="text-left py-3 px-4 font-bold text-gray-900">Format</th>
+              <th class="text-left py-3 px-4 font-bold text-gray-900">Sign</th>
+              <th class="text-left py-3 px-4 font-bold text-gray-900">Exponent</th>
+              <th class="text-left py-3 px-4 font-bold text-gray-900">Mantissa</th>
+              <th class="text-left py-3 px-4 font-bold text-gray-900">Min Value</th>
+              <th class="text-left py-3 px-4 font-bold text-gray-900">Max Value</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-300">
+            <tr>
+              <td class="py-3 px-4 font-medium">fp32</td>
+              <td class="py-3 px-4">1 bit</td>
+              <td class="py-3 px-4">8 bits</td>
+              <td class="py-3 px-4">23 bits</td>
+              <td class="py-3 px-4">~1.2 x 10^-38</td>
+              <td class="py-3 px-4">~3.4 x 10^38</td>
+            </tr>
+            <tr>
+              <td class="py-3 px-4 font-medium">fp16</td>
+              <td class="py-3 px-4">1 bit</td>
+              <td class="py-3 px-4">5 bits</td>
+              <td class="py-3 px-4">10 bits</td>
+              <td class="py-3 px-4">~6.0 x 10^-5</td>
+              <td class="py-3 px-4">~6.5 x 10^4</td>
+            </tr>
+            <tr>
+              <td class="py-3 px-4 font-medium">bfp16</td>
+              <td class="py-3 px-4">1 bit</td>
+              <td class="py-3 px-4">8 bits</td>
+              <td class="py-3 px-4">7 bits</td>
+              <td class="py-3 px-4">~9.2 x 10^-39</td>
+              <td class="py-3 px-4">~3.4 x 10^38</td>
+            </tr>
+          </tbody>
+        </table>
+      
+        <h3 class="text-xl font-bold text-gray-800 mt-6 mb-3">With what we have learned so far, can we now take a look when bfp16 is more reliable over fp16?</h3>
+
+        <p>
+          During backpropagation, suppose you have a gradient value of <strong>1.2 x 10^-8</strong>, a small but important update that 
+          helps the model learn.
+        </p>
+
+        <h4 class="text-lg font-semibold text-gray-800 mt-4 mb-2">With fp16</h4>
+        <ul class="list-disc pl-6 space-y-2">
+          <li>Smallest representable positive number ≈ <strong>6 × 10^-5</strong></li>
+          <li>Your gradient of <strong>1.2 × 10^-8</strong> is way below this and gets rounded to <strong>0</strong></li>
+          <li>The model essentially stops learning from this update</li>
+        </ul>
+
+        <h4 class="text-lg font-semibold text-gray-800 mt-4 mb-2">With bfp16</h4>
+        <ul class="list-disc pl-6 space-y-2">
+          <li>Smallest representable positive number ≈ <strong>9 × 10^-39</strong> (same range as fp32)</li>
+          <li>Your gradient of <strong>1.2 × 10^-8</strong> is easily representable</li>
+          <li>The update is applied correctly and everyone lived happily ever after</li>
+        </ul>
       </section>
+    
+
+      <br>
+      <br>
+      <section class="space-y-4">
+        <p>I think you are now ready to start understanding some real quantization algorithms.</p>
+      <p>until then, ciao!</p>
+    </section>
 
     </article>
 
