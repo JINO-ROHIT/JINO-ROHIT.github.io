@@ -94,7 +94,7 @@
           The general formula is:
         </p>
 
-        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-base"><code>value = (-1)^sign × (1.fraction) × 2^(exponent - bias)</code></pre>
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-base"><code>value = (-1)^sign x (1.fraction) x 2^(exponent - bias)</code></pre>
 
         <p>
           The bias is a constant that lets us store negative exponents using only positive 
@@ -192,6 +192,107 @@
         </p>
 
         <img src="artifacts/quantization/fp32_conversion.png" class="mx-auto my-4" />
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">float16 (Half Precision)</h2>
+
+        <p>
+          fp16 uses half the bits of fp32 hence requiring only half the memory needed for fp32.
+        </p>
+
+        <img src="artifacts/quantization/04_fp16.png" class="mx-auto my-4" />
+
+        <h3 class="text-xl font-bold text-gray-800 mt-6 mb-3">The Sign Bit</h3>
+        <p>
+          Same as fp32, just 1 bit to tell us if the number is positive or negative.
+        </p>
+
+        <h3 class="text-xl font-bold text-gray-800 mt-6 mb-3">The Exponent and the Bias</h3>
+        <p>
+          We have 5 bits for the exponent. Using the bias formula:
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-base"><code>bias = 2^(5-1) - 1 = 2^4 - 1 = 15</code></pre>
+
+        <p>
+          With 5 bits, stored exponents go from 0 to 31. But 0 and 31 are reserved 
+          (just like in fp32), so valid stored exponents range from 1 to 30.
+        </p>
+
+        <p>
+          The actual exponent range is:
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-base"><code>-14 ≤ E ≤ +15</code></pre>
+
+        <h3 class="text-xl font-bold text-gray-800 mt-6 mb-3">The Mantissa</h3>
+        <p>
+          We have 10 bits for the mantissa. Similar to fp32, there's an <strong>implicit 
+          leading 1</strong> for normalized numbers, giving us 11 bits of effective precision.
+        </p>
+
+        <p>
+          Compared to fp32's 23 bits, fp16 only has 10 mantissa bits,  this means 
+          much less precision. This limited precision causes two main problems:
+        </p>
+
+        <ul class="list-disc pl-6 space-y-2">
+          <li>
+            <strong>Gradient underflow</strong>: Values that are too small (like 8.9 × 10^-10) 
+            can't be represented and get rounded down to zero, causing the model to stop learning.
+          </li>
+          <li>
+            <strong>Gradient overflow</strong>: If gradients are too large to fit within 
+            the representable range, they become infinity or NaN, breaking training entirely.
+          </li>
+        </ul>
+
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">bfloat16 (Brain Float)</h2>
+
+        <p>
+          bf16 was developed by Google Brain (hence the name) specifically for deep learning. 
+          It strikes a better balance between range and precision than fp16.
+        </p>
+
+        <img src="artifacts/quantization/05_bf16.png" class="mx-auto my-4" />
+
+        <h3 class="text-xl font-bold text-gray-800 mt-6 mb-3">The Sign Bit</h3>
+        <p>
+          Still just 1 bit.
+        </p>
+
+        <h3 class="text-xl font-bold text-gray-800 mt-6 mb-3">The Exponent</h3>
+        <p>
+          bf16 gives us 8 bits for the exponent - the same as fp32! This preserves 
+          the vast range that fp32 offers.
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-base"><code>bias = 2^(8-1) - 1 = 2^7 - 1 = 127</code></pre>
+
+        <p>
+          The actual exponent range is:
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-base"><code>-126 ≤ E ≤ +127</code></pre>
+
+        <h3 class="text-xl font-bold text-gray-800 mt-6 mb-3">The Mantissa</h3>
+        <p>
+          We only have 7 bits for the mantissa - even less than fp16's 10 bits. 
+          This means bf16 actually has <em>less</em> precision than fp16.
+        </p>
+
+        <p>
+          But here's the thing: for deep learning, having a wide <strong>range</strong> 
+          matters more than having ultra-fine precision. The gradients during training 
+          can vary wildly in magnitude, and bf16's fp32-like exponent helps avoid 
+          the underflow problems that fp16 faces.
+        </p>
+
+      </section>
 
     </article>
 
