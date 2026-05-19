@@ -53,257 +53,146 @@
     <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
       <section class="space-y-4">
         <p>
-          The more and more LLMs get better, they also seem to be getting bigger. 
-          The frontier models have over 1 trillion parameters. It's also cool when all you have to do is invoke an api and generate the response.
-          What if i wanted to host this model myself? What would i need to do.
-
-          First step would be to load the weights into memory.
-          For context, a 70B Llama in fp32 would need ~ 32/8 * 70 = 280 GB.
-
-          Oh, 280GB for a 70B model? Forget about 1T models then.
-
-          Just kidding. This is where quantization is super crucial. In plain terms, quantization is a technique by which i can make LLMs N times smaller and
-          faster just sacrificing a fraction of performance. Pretty cool yes? 
+          LLMs keep getting better, but they also keep getting bigger. Frontier models now have 
+          over 1 trillion parameters. It's amazing when you can just call an API and get a 
+          response but what if you wanted to run these models yourself?
         </p>
 
         <p>
-          But before talking about <em>how</em> quantization works, you really need to lock in the concept of how numbers are stored in memory. 
-          We will focus mostly on the floating point formats like <code>half(fp16)</code>, <code>bfloat16</code>, and
-          <code>int8</code>. So this post is really about building the mental model for those
-          formats first.
+          The first step is loading the weights into memory. For a 70B parameter model in 
+          full precision (fp32), you'd need 70 billion x 4 bytes = roughly 280 GB. That's 
+          more than most GPUs have!
+        </p>
+
+        <p>
+          Quantization makes LLMs N times smaller and faster while sacrificing only a fraction of 
+          performance. Pretty powerful, yes?
+        </p>
+
+        <p>
+          But before we talk about how quantization works, you need to understand how numbers 
+          are actually stored in memory. This post is all about building the mental model before we go into quantization techniques.
         </p>
 
         <img src="artifacts/quantization/01_load_vram.png" class="mx-auto my-4" />
       </section>
 
       <section class="space-y-4">
-        <h2 class="text-2xl font-serif font-bold text-gray-950">How to represent numbers</h2>
+        <h2 class="text-2xl font-serif font-bold text-gray-950">How Computers Represent Numbers</h2>
 
         <p>
-          Floating point numbers are stored using three parts:
+          Floating point numbers are stored using three components:
         </p>
 
         <ul class="list-disc pl-6 space-y-2">
-          <li><strong>Sign bit</strong>: tells us whether the number is positive or negative.</li>
-          <li><strong>Exponent bits</strong>: tell us the scale of the number.</li>
-          <li><strong>Mantissa bits</strong>: the fractional part that usually tells how precise the number is.</li>
+          <li><strong>Sign bit</strong>: 1 bit that tells us if the number is positive or negative.</li>
+          <li><strong>Exponent</strong>: Controls the scale or magnitude of the number.</li>
+          <li><strong>Mantissa (also called fraction)</strong>: The actual digits that determines precision.</li>
         </ul>
 
         <p>
-          The rough idea is:
+          The general formula is:
         </p>
 
-        <!-- write this as latex -->
         <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-base"><code>value = (-1)^sign × (1.fraction) × 2^(exponent - bias)</code></pre>
 
         <p>
-          We will look at each of these components in detail.
+          The bias is a constant that lets us store negative exponents using only positive 
+          numbers. We'll unpack this when we look at fp32.
         </p>
 
         <img src="artifacts/quantization/number.png" class="mx-auto my-4" />
       </section>
 
       <section class="space-y-4">
-        <h2 class="text-2xl font-serif font-bold text-gray-950">float32</h2>
+        <h2 class="text-2xl font-serif font-bold text-gray-950">float32 (Single Precision)</h2>
 
         <p>
-          <code>fp32</code> is the standard 32-bit floating-point format and is often the reference
-          format people have in mind when they say "full precision."
+          fp32 is the standard 32-bit floating-point format, it's what people mean when 
+          they say "full precision".
         </p>
 
         <img src="artifacts/quantization/02_fp32.png" class="mx-auto my-4" />
 
-        <ul class="list-disc pl-6 space-y-2">
-          <li>we have 1 bit for sign. <code>0</code> means positive, <code>1</code> means negative.</li></li>
-          <li>8 bits for exponent</li>
-          <li>23 bits for mantissa</li>
-        </ul>
-
+        <h3 class="text-xl font-bold text-gray-800 mt-6 mb-3">The Sign Bit</h3>
         <p>
-          now, according to IEEE-754 convention, the exponents are stored in a biased form.
-          ```
-          Estored = Eactual + bias
+          A single bit determines whether the number is positive or negative. 0 means 
+          positive, 1 means negative. This gives us symmetric range for positive and 
+          negative values.
+        </p>
 
-          where bias = 2^(k − 1) − 1
-          k = exponent bits
-          ```
+        <h3 class="text-xl font-bold text-gray-800 mt-6 mb-3">The Exponent and the Bias</h3>
+        <p>
+          We have 8 bits for the exponent, which can represent values from 0 to 255. 
+          But here's the challenge: we need to represent very large numbers (like 10^38) 
+          and very small numbers (like 10^-38) using these same 8 bits.
         </p>
 
         <p>
-          for fp32, bias = 2 ^ 8 - 1 = 255
-          So for fp16 we shift them by +255 when storing, and then subtract -255 when reading.
+          The problem is that exponents can be negative, but we can't store a minus 
+          sign in unsigned binary. The solution is to use <strong>biased representation</strong>:
+          we add a constant (called the bias) to the actual exponent when storing it.
         </p>
 
         <p>
-          the exponent field cannot be all zeros or all ones. That means:
+          The bias formula is:
         </p>
 
-        <ul class="list-disc pl-6 space-y-2">
-          <li><code>00000000</code> is reserved for zero and subnormal values</li>
-          <li><code>11111111</code> is reserved for infinity and NaNs</li>
-          <li>So out of the total 256 exponents, valid normalized stored exponents are from <code>1</code> to <code>254</code></li>
-        </ul>
-
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-base"><code>bias = 2^(k-1) - 1</code></pre>
 
         <p>
-          So the actual exponent range for normalized <code>fp32</code> values is:
+          where k = number of exponent bits. For fp32 with 8 bits:
         </p>
 
-        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-base"><code>-126 ≤ E ≤ 127</code></pre>
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-base"><code>bias = 2^(8-1) - 1 = 2^7 - 1 = 127</code></pre>
 
         <p>
-          <code>fp32</code> gives you both a huge range and high precision, but it costs 32 bits per number. 
-          For LLMs with billions of parameters, that memory cost scales up real quick.
+          So when we store an exponent, we add 127 to the actual exponent. When we read 
+          it, we subtract 127. This shift lets us represent negative exponents without 
+          needing a sign bit for them.
         </p>
-      </section>
 
-      <!-- <section class="space-y-4">
-        <h2 class="text-2xl font-serif font-bold text-gray-950">Step 2: fp16</h2>
-
+        <h3 class="text-xl font-bold text-gray-800 mt-6 mb-3">Special Exponent Values</h3>
         <p>
-          <code>fp16</code>, also called half precision, cuts the storage cost in half.
+          According to IEEE-754, two exponent values are reserved for special cases:
         </p>
 
         <ul class="list-disc pl-6 space-y-2">
-          <li>1 bit for sign</li>
-          <li>5 bits for exponent</li>
-          <li>10 bits for mantissa</li>
+          <li><code>00000000</code> (all zeros) is reserved for zero and subnormal values</li>
+          <li><code>11111111</code> (all ones) is reserved for infinity and NaN (not a number)</li>
         </ul>
 
         <p>
-          Now the same procedure:
-        </p>
-
-        <ol class="list-decimal pl-6 space-y-2">
-          <li>Read the sign bit.</li>
-          <li>Read the 5 exponent bits.</li>
-          <li>Compute the bias: <code>2^(5 - 1) - 1 = 15</code>.</li>
-          <li>Subtract <code>15</code> from the stored exponent.</li>
-          <li>Read the 10 mantissa bits and attach them to the implicit leading <code>1</code>.</li>
-          <li>Reconstruct the number.</li>
-        </ol>
-
-        <p>
-          Again, all-zero and all-one exponents are special:
-        </p>
-
-        <ul class="list-disc pl-6 space-y-2">
-          <li><code>00000</code> is reserved for zero and subnormal values</li>
-          <li><code>11111</code> is reserved for infinity and NaNs</li>
-          <li>Valid normalized stored exponents are from <code>1</code> to <code>30</code></li>
-        </ul>
-
-        <p>
+          This means valid stored exponents range from 1 to 254 (not 0 or 255). 
           So the actual exponent range is:
         </p>
 
-        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-base"><code>-14 ≤ E ≤ 15</code></pre>
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-base"><code>-126 ≤ E ≤ +127</code></pre>
 
+
+        <h3 class="text-xl font-bold text-gray-800 mt-6 mb-3">The Mantissa (the fractional part)</h3>
         <p>
-          This is the key tradeoff of <code>fp16</code>: you save a lot of memory, but you lose
-          both range and precision compared to <code>fp32</code>. In practice, <code>fp16</code>
-          works well for many deep learning workloads, but it can overflow more easily because its
-          exponent is small.
-        </p>
-
-        <p>
-          A useful number to remember is that the largest finite <code>fp16</code> value is
-          roughly <code>65504</code>. That is plenty for many activations and weights, but much
-          smaller than what <code>fp32</code> can represent.
-        </p>
-
-        <p class="text-sm italic text-orange-700">
-          [Picture marker: a side-by-side visual comparing fp32 and fp16 bit layouts, with fp16
-          showing fewer exponent and mantissa bits.]
-        </p>
-      </section>
-
-      <section class="space-y-4">
-        <h2 class="text-2xl font-serif font-bold text-gray-950">Step 3: bfloat16</h2>
-
-        <p>
-          <code>bfloat16</code> is a very important format for modern ML systems because it makes a
-          different compromise than <code>fp16</code>.
-        </p>
-
-        <ul class="list-disc pl-6 space-y-2">
-          <li>1 bit for sign</li>
-          <li>8 bits for exponent</li>
-          <li>7 bits for mantissa</li>
-        </ul>
-
-        <p>
-          Notice the design choice immediately: <code>bfloat16</code> keeps the same exponent size
-          as <code>fp32</code>, but throws away mantissa bits.
-        </p>
-
-        <ol class="list-decimal pl-6 space-y-2">
-          <li>Read the sign bit.</li>
-          <li>Read the 8 exponent bits.</li>
-          <li>The bias is the same as <code>fp32</code>: <code>127</code>.</li>
-          <li>Subtract the bias to get the actual exponent.</li>
-          <li>Read the 7 mantissa bits and combine them with the implicit leading <code>1</code>.</li>
-          <li>Reconstruct the number.</li>
-        </ol>
-
-        <p>
-          Because it has the same exponent width as <code>fp32</code>, the normalized exponent
-          range is also the same:
-        </p>
-
-        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-base"><code>-126 ≤ E ≤ 127</code></pre>
-
-        <p>
-          This is why <code>bfloat16</code> is often preferred in training systems: it has far less
-          precision than <code>fp32</code>, but it preserves almost all of the same dynamic range.
-          In plain language, it is much less likely to blow up just because the exponent could not
-          represent a very large or very small value.
+          We have 23 bits for the mantissa. But here's a secret, for normalized 
+          numbers, there's an <strong>implicit leading 1</strong>. We don't actually store 
+          that leading 1 because its always present for normalized values.
         </p>
 
         <p>
-          So the tradeoff looks like this:
-        </p>
-
-        <ul class="list-disc pl-6 space-y-2">
-          <li><code>fp16</code>: better precision than <code>bfloat16</code>, but smaller range</li>
-          <li><code>bfloat16</code>: worse precision than <code>fp16</code>, but much larger range</li>
-        </ul>
-
-        <p class="text-sm italic text-orange-700">
-          [Picture marker: a chart showing fp32, fp16, and bfloat16 on two axes: precision vs
-          dynamic range.]
-        </p>
-      </section>
-
-      <section class="space-y-4">
-        <h2 class="text-2xl font-serif font-bold text-gray-950">Why This Matters for Quantization</h2>
-
-        <p>
-          Quantization pushes this idea even further. Instead of storing weights in 32 or 16 bits,
-          we may store them in 8 bits, 4 bits, or even lower. The storage savings are huge, but now
-          we can no longer rely on a floating-point exponent and mantissa for every value. We need
-          explicit scaling rules to map the original numbers into a smaller integer range.
+          <em>A normalized floating-point number means the number is written in a standard form where the binary representation starts with exactly one non-zero digit before the decimal point. Zero is not a normalized number.</em>
         </p>
 
         <p>
-          That is why understanding floating-point formats comes first. If you know what
-          <code>fp32</code>, <code>fp16</code>, and <code>bfloat16</code> are doing, then
-          quantization becomes easier to think about: it is just another step in the same direction,
-          sacrificing numerical fidelity in exchange for efficiency.
+          So we effectively get 24 bits of precision (the implicit 1 plus the 23 stored bits). 
         </p>
 
-        <p class="text-sm italic text-orange-700">
-          [Picture marker: a pipeline from fp32 checkpoint -&gt; fp16/bfloat16 -&gt; int8/int4
-          quantized model.]
-        </p>
-      </section> -->
+        <img src="artifacts/quantization/03_normalized_numbers.png" class="mx-auto my-4" />
 
         <p>
-          In the next blog, we can build on this and look at the actual quantization techniques:
-          scales, zero-points, per-tensor vs per-channel quantization, and why some layers are more
-          sensitive than others.
+          Let's walk through decoding an fp32 number step by step. Say we have this binary:
         </p>
-      </section>
+
+        <img src="artifacts/quantization/fp32_conversion.png" class="mx-auto my-4" />
+
     </article>
 
     <script>
