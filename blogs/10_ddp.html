@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pytorch DDP</title>
+
+    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body);"></script>
+
+  </head>
+
+  <body class="bg-orange-50 text-gray-900 w-full max-w-3xl mx-auto px-5 md:px-0 pb-20">
+    <nav class="flex justify-between items-center py-6 border-b border-gray-300">
+      <h1 class="font-serif text-3xl font-bold">Jino Rohit</h1>
+      <div class="flex gap-6 text-sm">
+        <a href="../index.html" class="hover:text-orange-600 transition">Home</a>
+        <a href="./blog.html" class="hover:text-orange-600 transition">Blogs</a>
+        <a href="../projects/projects.html" class="hover:text-orange-600 transition">Projects</a>
+      </div>
+    </nav>
+
+    <header class="mt-12">
+      <h1 class="font-serif text-4xl font-bold leading-tight text-gray-950">
+        Everything you need to know about Pytorch Distributed Data Parallel(DDP)
+      </h1>
+      <p class="text-sm text-gray-600 mt-4 italic">May 28, 2026 • 20 min read</p>
+    </header>
+
+    <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
+  
+      <section class="space-y-4">
+        <section class="space-y-4">
+        <p>
+            Distributed Data Parallel (DDP) is a pytorch module that supports multi-machine, multi-GPU, distributed training.
+            In DDP, you run copies of the model independently on each GPU and later sync to update gradients across the different data. (write this better)
+        </p>
+        <p>
+          In this post we will cover everything you need to know and write some distributed training scripts for LLMs!
+        </p>
+      </section>
+
+
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+            How to think about scaling to multiple GPUS
+        </h2>
+
+        <p>the scenario for training on multiple GPUs vs inference on multiple GPus is extreemly different. in this post, we only focus on the training setup.
+
+         we will also turn out focus specifically on data parallelism that pytorch DDP offers although which is the simplest technique to start scaling to multiple gpus.
+        </p>
+
+        <p> I have 10 zillion data samples which if i run on a single GPU is probably going to take years.
+            what if i split the data across the N gpus i have, and then run the specific split of data across each model running on each GPU.
+        </p>
+
+        <p>
+            hmmm, that wont cut it, because if they run independently, they will end up being N different models instead of a single one. instead we need a single model
+            that is somehow able to accumulate knowledge from all the other runnings gpus.
+        </p>
+
+        <p>At this point, it good to remind ourselves of how training a model works.</p>
+
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+            Training a Model
+        </h2>
+
+        <p>i would probably describe the flow as follow - </p>
+
+        <p>1. create batches of data 2. at each time step, feed one batch through the model 3. get logits and pass through softmax for scores</p>
+        <p>4. calculate loss 5. update weights</p>
+
+        <p> perfect, now out of the five stages i described, what do you think is the stage that has the most impact on the models learning?
+            the weight updation! basically, its okay to independently run all the stages of training on different gpus as long you are able to sync the gradients
+            to make a final proper weight updation. 
+        </p>
+
+        <p> DDP offers to do exactly this, a smart way to sync gradients across multiple gpus and then let the training carry on.</p>
+
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+            
+        </h2>
+
+        this is probably where we talk about the all reduce and ring reduce etc
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+            Basic Terminology
+        </h2>
+
+        <p>
+            world size
+
+            The number of parallel operations worldwide is simply 2 x 8 = 16.
+
+            # world size
+            torch.distributed.get_world_size()
+            rank
+
+            This represents the sequence number of the current process, used for inter-process communication. For a world size of 16, this is 0, 1, 2, ..., 15.
+            Note: The process with rank=0 is the master process.
+
+            # rank
+            torch.distributed.get_rank()
+            local_rank
+
+            Another sequence number. These are the process numbers on each machine. Machine 1 has 0, 1, 2, 3, 4, 5, 6, 7, and Machine 2 also has 0, 1, 2, 3, 4, 5, 6, 7.
+
+            # local rank
+            torch.distributed.local_rank()
+        </p>
+
+
+    </article>
+
+    <script>
+      lucide.createIcons();
+    </script>
+  </body>
+</html>
