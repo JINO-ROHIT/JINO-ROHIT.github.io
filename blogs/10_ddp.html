@@ -36,12 +36,12 @@
       <section class="space-y-4">
         <p>
           You have a model. Its good. But you want it to be better. That means more data, bigger
-          batch sizes, longer training runs. A single GPU just isnt cutting it anymore.
+          batch sizes, longer training runs. A single GPU is probably just not enough.
         </p>
 
         <p>
-          Distributed Data Parallel (DDP) is a pytorch module that supports multi-machine, multi-GPU, distributed training.
-          The core idea is simple: you replicate your model on every GPU, feed
+          Distributed Data Parallel (DDP) is a pytorch module that lets you do multi-GPU, distributed training.
+          The core idea is simple - you replicate your model on every GPU, feed
           each replica a different slice of the batch, and synchronise gradients at each step so
           all replicas stay in sync.
         </p>
@@ -61,12 +61,11 @@
         <p>
           The scenario for training on multiple GPUs vs inference on multiple GPUs is extremely different.
           In this post we only focus on training.
-        </p>
 
-        <p>
           We will also turn our focus specifically to <strong>data parallelism</strong> that pytorch DDP offers.
           It is the simplest technique to start scaling to multiple GPUs.
         </p>
+
 
         <p>
           I have 10 zillion data samples, and running them on a single GPU is probably going to take years.
@@ -125,7 +124,7 @@
 
         <ul class="list-disc pl-6 space-y-2">
           <li>
-            <strong>DP</strong> uses a single process(due to the GIL interpreter). It slices the input, scatters
+            <strong>DP</strong> uses a single process (due to the GIL interpreter). It slices the input, scatters
             it to GPUs, computes loss, and broadcasts gradients back. The model
             is replicated per GPU inside the forward pass. This creates a lot of overhead because the
             main GPU (rank 0) becomes a bottleneck for communication.
