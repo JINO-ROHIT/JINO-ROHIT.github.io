@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Pytorch DDP</title>
+    <title>Everything you need to know about Pytorch DDP</title>
 
     <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
@@ -28,98 +28,371 @@
       <h1 class="font-serif text-4xl font-bold leading-tight text-gray-950">
         Everything you need to know about Pytorch Distributed Data Parallel(DDP)
       </h1>
-      <p class="text-sm text-gray-600 mt-4 italic">May 28, 2026 • 20 min read</p>
+      <p class="text-sm text-gray-600 mt-4 italic">May 28, 2026 • 10 min read</p>
     </header>
 
     <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
-  
+
       <section class="space-y-4">
-        <section class="space-y-4">
         <p>
-            Distributed Data Parallel (DDP) is a pytorch module that supports multi-machine, multi-GPU, distributed training.
-            In DDP, you run copies of the model independently on each GPU and later sync to update gradients across the different data. (write this better)
+          You have a model. Its good. But you want it to be better. That means more data, bigger
+          batch sizes, longer training runs. A single GPU just isnt cutting it anymore.
         </p>
+
         <p>
-          In this post we will cover everything you need to know and write some distributed training scripts for LLMs!
+          Distributed Data Parallel (DDP) is a pytorch module that supports multi-machine, multi-GPU, distributed training.
+          The core idea is simple: you replicate your model on every GPU, feed
+          each replica a different slice of the batch, and synchronise gradients at each step so
+          all replicas stay in sync.
+        </p>
+
+        <p>
+          In this post we will cover everything you need to know to get started with distributed training using pytorch!
+        </p>
+
+      </section>
+
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          How to think about scaling to multiple GPUs
+        </h2>
+
+        <p>
+          The scenario for training on multiple GPUs vs inference on multiple GPUs is extremely different.
+          In this post we only focus on training.
+        </p>
+
+        <p>
+          We will also turn our focus specifically to <strong>data parallelism</strong> that pytorch DDP offers.
+          It is the simplest technique to start scaling to multiple GPUs.
+        </p>
+
+        <p>
+          I have 10 zillion data samples, and running them on a single GPU is probably going to take years.
+          What if I split the data across the N GPUs I have, and run each split on a model replica running on each GPU.
+        </p>
+
+        <p>
+          Hmm, that wont cut it. If they run independently, you end up with N different models instead of
+          one. We need a single model that somehow accumulates knowledge from all the running GPUs.
+        </p>
+
+        <p>At this point it is good to remind ourselves of how training a model actually works.</p>
+      </section>
+
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Training a Model
+        </h2>
+
+        <img src="artifacts/torch_dpp/training_flow.png" class="mx-auto my-4" />
+
+        <p>i would describe the flow as follows -</p>
+
+        <ol class="list-decimal pl-6 space-y-2">
+          <li>Create batches of data.</li>
+          <li>At each step, feed one batch through the model.</li>
+          <li>Get logits, pass through softmax for scores, calculate loss.</li>
+          <li>Call loss.backward() to compute gradients.</li>
+          <li>Call optimizer.step() to update weights.</li>
+        </ol>
+
+        <p>
+          Out of these five stages, what do you think has the biggest impact on the models learning?
+          The weight update! It is okay to independently run all the other stages on different GPUs,
+          as long as you sync the gradients before doing the weight update.
+        </p>
+
+        <p>
+          DDP does exactly this, it provides a smart way to sync gradients across multiple GPUs
+          and then lets training carry on as usual.
         </p>
       </section>
 
 
-
       <section class="space-y-4">
         <h2 class="text-2xl font-serif font-bold text-gray-950">
-            How to think about scaling to multiple GPUS
-        </h2>
-
-        <p>the scenario for training on multiple GPUs vs inference on multiple GPus is extreemly different. in this post, we only focus on the training setup.
-
-         we will also turn out focus specifically on data parallelism that pytorch DDP offers although which is the simplest technique to start scaling to multiple gpus.
-        </p>
-
-        <p> I have 10 zillion data samples which if i run on a single GPU is probably going to take years.
-            what if i split the data across the N gpus i have, and then run the specific split of data across each model running on each GPU.
-        </p>
-
-        <p>
-            hmmm, that wont cut it, because if they run independently, they will end up being N different models instead of a single one. instead we need a single model
-            that is somehow able to accumulate knowledge from all the other runnings gpus.
-        </p>
-
-        <p>At this point, it good to remind ourselves of how training a model works.</p>
-
-        <h2 class="text-2xl font-serif font-bold text-gray-950">
-            Training a Model
-        </h2>
-
-        <p>i would probably describe the flow as follow - </p>
-
-        <p>1. create batches of data 2. at each time step, feed one batch through the model 3. get logits and pass through softmax for scores</p>
-        <p>4. calculate loss 5. update weights</p>
-
-        <p> perfect, now out of the five stages i described, what do you think is the stage that has the most impact on the models learning?
-            the weight updation! basically, its okay to independently run all the stages of training on different gpus as long you are able to sync the gradients
-            to make a final proper weight updation. 
-        </p>
-
-        <p> DDP offers to do exactly this, a smart way to sync gradients across multiple gpus and then let the training carry on.</p>
-
-      </section>
-
-      <section class="space-y-4">
-        <h2 class="text-2xl font-serif font-bold text-gray-950">
-            
-        </h2>
-
-        this is probably where we talk about the all reduce and ring reduce etc
-      </section>
-
-      <section class="space-y-4">
-        <h2 class="text-2xl font-serif font-bold text-gray-950">
-            Basic Terminology
+          Wait, isnt this just Data Parallelism?
         </h2>
 
         <p>
-            world size
-
-            The number of parallel operations worldwide is simply 2 x 8 = 16.
-
-            # world size
-            torch.distributed.get_world_size()
-            rank
-
-            This represents the sequence number of the current process, used for inter-process communication. For a world size of 16, this is 0, 1, 2, ..., 15.
-            Note: The process with rank=0 is the master process.
-
-            # rank
-            torch.distributed.get_rank()
-            local_rank
-
-            Another sequence number. These are the process numbers on each machine. Machine 1 has 0, 1, 2, 3, 4, 5, 6, 7, and Machine 2 also has 0, 1, 2, 3, 4, 5, 6, 7.
-
-            # local rank
-            torch.distributed.local_rank()
+          You might have heard of PyTorchs old <code class="bg-stone-200 px-1 rounded">DataParallel</code> (DP) module.
+          DP does the same thing conceptually - split a batch across GPUs  but it works very differently
+          under the hood.
         </p>
 
+        <ul class="list-disc pl-6 space-y-2">
+          <li>
+            <strong>DP</strong> uses a single process(due to the GIL interpreter). It slices the input, scatters
+            it to GPUs, computes loss, and broadcasts gradients back. The model
+            is replicated per GPU inside the forward pass. This creates a lot of overhead because the
+            main GPU (rank 0) becomes a bottleneck for communication.
+          </li>
+          <li>
+            <strong>DDP</strong> spawns one process per GPU. Each process has its own python interpreter,
+            its own optimizer, and its own model replica. There is no central coordinator. Gradients
+            are synchronised via <strong>all-reduce</strong> during the backward pass, completely
+            overlapping with computation.
+          </li>
+        </ul>
+
+      </section>
+
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Gradient Synchronisation and All-Reduce
+        </h2>
+
+        <p>
+          The core algorithmic primitive behind DDP is <strong>all-reduce</strong>.
+        </p>
+
+        <p>
+          Imagine you have N GPUs. After the forward and backward pass, each GPU holds its own
+          local gradients. The all-reduce operation takes these N tensors (one per GPU) and produces
+          the <em>same</em> reduced tensor on every GPU. 
+        </p>
+
+        <img src="artifacts/torch_dpp/all_reduce.png" class="mx-auto my-4" />
+
+        <p>
+          Every GPU ends up with the exact same averaged gradient, applies the same
+          <code class="bg-stone-200 px-1 rounded">optimizer.step()</code>, and all replicas stay synchronised.
+        </p>
+
+        <h3 class="text-xl font-serif font-semibold text-gray-950 mt-6">Ring All-Reduce</h3>
+
+        <p>
+          The problem with naive all-reduce is the communication overhead. it needs to send gradients to each single GPU and this also means it has to wait for
+          all the other GPUs to complete
+        </p>
+
+        <img src="artifacts/torch_dpp/ring_allreduce.png" class="mx-auto my-4" />
+
+        <p>
+          <strong>Ring all-reduce</strong> avoids this bottleneck. The N GPUs are arranged in a
+          logical ring. The algorithm runs in two phases:
+        </p>
+
+        <p>
+          Each process calculates its gradient independently.
+        Each process passes the gradient to the next process in sequence, and then passes the gradient obtained from the previous process to the next process. After looping n times (the number of processes), all processes will have obtained all the gradients.
+        As you can see, each process only communicates with its upstream and downstream processes, which greatly alleviates the communication blockage phenomenon of the parameter server!
+        </p>
+
+      </section>
+
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Basic Terminology
+        </h2>
+
+        <p>
+          Before writing code, lets get familiar with the key concepts you will encounter in every
+          DDP script.
+        </p>
+
+        <div class="space-y-6">
+          <div>
+            <h3 class="text-xl font-serif font-bold text-gray-900">World Size</h3>
+            <p>
+              Total number of processes participating in the distributed job. If you have 2 machines
+              with 8 GPUs each, world size = 16.
+            </p>
+            <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-base mt-2"><code>torch.distributed.get_world_size()</code></pre>
+          </div>
+
+          <div>
+            <h3 class="text-xl font-serif font-bold text-gray-900">Rank</h3>
+            <p>
+              A unique identifier (0 to world_size - 1) assigned to each process.. The process with rank 0 is conventionally the
+              <strong>master</strong> process.
+            </p>
+            <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-base mt-2"><code>torch.distributed.get_rank()</code></pre>
+          </div>
+
+          <div>
+            <h3 class="text-xl font-serif font-bold text-gray-900">Local Rank</h3>
+            <p>
+              The process index within a single machine. On a machine with 8 GPUs, local ranks are
+              0 through 7. Machine 1 has local ranks 0-7, Machine 2 also has 0-7. This is handy for
+              assigning each process to the correct GPU device.
+            </p>
+            <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-base mt-2"><code>int(os.environ['LOCAL_RANK'])</code></pre>
+          </div>
+
+          <div>
+            <h3 class="text-xl font-serif font-bold text-gray-900">Master Address &amp; Port</h3>
+            <p>
+              All processes need to know where the master (rank 0) is to initialise the process group.
+              These are passed via environment variables:
+              <code class="bg-stone-200 px-1 rounded">MASTER_ADDR</code> and
+              <code class="bg-stone-200 px-1 rounded">MASTER_PORT</code>.
+            </p>
+          </div>
+
+          <div>
+            <h3 class="text-xl font-serif font-bold text-gray-900">Backend</h3>
+            <p>
+              The communication library. On NVIDIA GPUs, this is
+              <strong>NCCL</strong> (NVIDIA Collective Communications Library). For CPUs you would
+              use <strong>GLOO</strong> or <strong>MPI</strong>.
+            </p>
+          </div>
+        </div>
+      </section>
+
+
+
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Writing a DDP Training Script
+        </h2>
+
+        <p>
+          Lets put this all together and write a distributed training script.
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-base"><code>import os
+import torch
+import torch.distributed as dist
+import torch.nn as nn
+import torch.optim as optim
+from torch.nn.parallel import DistributedDataParallel as DDP
+
+def setup():
+    dist.init_process_group("nccl")
+    torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
+
+def cleanup():
+    dist.destroy_process_group()
+
+class ToyModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(1024, 4096),
+            nn.ReLU(),
+            nn.Linear(4096, 1024),
+        )
+    def forward(self, x):
+        return self.net(x)
+
+def train():
+    setup()
+    rank = dist.get_rank()
+    local_rank = int(os.environ["LOCAL_RANK"])
+    world_size = dist.get_world_size()
+
+    model = ToyModel().cuda(local_rank)
+    ddp_model = DDP(model, device_ids=[local_rank])
+
+    optimizer = optim.AdamW(ddp_model.parameters(), lr=3e-4)
+    loss_fn = nn.CrossEntropyLoss()
+
+    dataset_size = 10000
+    microbatch = 32
+    loader = torch.utils.data.DataLoader(
+        torch.randn(dataset_size, 1024),
+        batch_size=microbatch,
+        shuffle=True,
+    )
+
+    for epoch in range(10):
+        for batch_idx, (x,) in enumerate(loader):
+            x = x.cuda(local_rank)
+
+            logits = ddp_model(x)
+            loss = loss_fn(logits, torch.randn_like(logits))
+
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+            if rank == 0 and batch_idx % 50 == 0:
+                print(f"Epoch {epoch}, batch {batch_idx}, loss {loss.item():.4f}")
+
+    cleanup()
+
+if __name__ == "__main__":
+    train()</code></pre>
+
+
+        <ul class="list-disc pl-6 space-y-2">
+          <li>
+            <code class="bg-stone-200 px-1 rounded">dist.init_process_group("nccl")</code>
+            initialises the NCCL backend. This reads
+            <code class="bg-stone-200 px-1 rounded">MASTER_ADDR</code>,
+            <code class="bg-stone-200 px-1 rounded">MASTER_PORT</code>,
+            <code class="bg-stone-200 px-1 rounded">WORLD_SIZE</code>, and
+            <code class="bg-stone-200 px-1 rounded">RANK</code> from environment variables.
+          </li>
+          <li>
+            Each process sets its CUDA device to its local rank via
+            <code class="bg-stone-200 px-1 rounded">torch.cuda.set_device(local_rank)</code>.
+          </li>
+          <li>
+            The model is moved to the correct GPU <em>before</em> wrapping it in DDP.
+          </li>
+          <li>
+            <code class="bg-stone-200 px-1 rounded">DDP(model, device_ids=[local_rank])</code>
+            tells DDP which GPU this replica lives on.
+          </li>
+          <li>
+            Only rank 0 handles logging and checkpointing. Other ranks participate purely in
+            computation and communication.
+          </li>
+        </ul>
+      </section>
+
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Launching with torchrun
+        </h2>
+
+        <p>
+          You do not launch a DDP script with a plain <code class="bg-stone-200 px-1 rounded">python train.py</code>.
+          Instead, use <strong>torchrun</strong>, which is the standard entry point for distributed
+          PyTorch jobs:
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-base"><code>torchrun --nproc_per_node=8 train.py</code></pre>
+
+        <p>
+          This spawns 8 processes, each with its own
+          <code class="bg-stone-200 px-1 rounded">RANK</code>,
+          <code class="bg-stone-200 px-1 rounded">LOCAL_RANK</code>, and
+          <code class="bg-stone-200 px-1 rounded">WORLD_SIZE</code> environment variables set automatically.
+        </p>
+
+
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Wrapping Up
+        </h2>
+
+        <p>
+          With all of this you should be ready to start writing distributed training scripts for
+          LLMs and scale your experiments beyond a single GPU.
+        </p>
+
+        <p>In the next couple of blogs, I will focus more on distributed techniques and more production ready libraries like megatron.</p>
+
+
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Further Reading
+        </h2>
+
+        <p>pytorch blog - https://docs.pytorch.org/tutorials/intermediate/ddp_tutorial.html</p>
+
+      </section>
 
     </article>
 
