@@ -166,22 +166,28 @@
         <h3 class="text-xl font-serif font-semibold text-gray-950 mt-6">Ring All-Reduce</h3>
 
         <p>
-          The problem with naive all-reduce is the communication overhead. it needs to send gradients to each single GPU and this also means it has to wait for
-          all the other GPUs to complete
+          A naive all-reduce puts enormous pressure on a single node.
+          Each GPU either waits on a central coordinator or exchanges with every other GPU, creating
+          \(O(N^2)\) communication volume.
         </p>
 
         <img src="artifacts/torch_dpp/ring_allreduce.png" class="mx-auto my-4" />
 
         <p>
-          <strong>Ring all-reduce</strong> avoids this bottleneck. The N GPUs are arranged in a
-          logical ring. The algorithm runs in two phases:
+          <strong>Ring all-reduce</strong> avoids this bottleneck. The \(N\) GPUs are arranged in a
+          logical ring. Each GPU only talks to its immediate neighbours. The algorithm runs in two phases:
         </p>
 
-        <p>
-          Each process calculates its gradient independently.
-        Each process passes the gradient to the next process in sequence, and then passes the gradient obtained from the previous process to the next process. After looping n times (the number of processes), all processes will have obtained all the gradients.
-        As you can see, each process only communicates with its upstream and downstream processes, which greatly alleviates the communication blockage phenomenon of the parameter server!
-        </p>
+        <ol class="list-decimal pl-6 space-y-2">
+          <li>
+            Each process calculates its gradient independently.
+          </li>
+          <li>
+            Each process passes the gradient to the next process in sequence, and then passes the gradient obtained from the previous process to the next process.
+            After looping N times (the number of processes), all processes will have obtained all the gradients.
+          </li>
+        </ol>
+
 
       </section>
 
@@ -387,10 +393,16 @@ if __name__ == "__main__":
 
 
         <h2 class="text-2xl font-serif font-bold text-gray-950">
-          Further Reading
+          References
         </h2>
 
-        <p>pytorch blog - https://docs.pytorch.org/tutorials/intermediate/ddp_tutorial.html</p>
+        <ol class="list-decimal pl-6 space-y-2 text-base">
+          <li>
+            <a href="https://pytorch.org/tutorials/intermediate/ddp_tutorial.html" class="text-orange-700 underline hover:text-orange-900">
+              PyTorch DDP Tutorial
+            </a>
+          </li>
+        </ol>
 
       </section>
 
