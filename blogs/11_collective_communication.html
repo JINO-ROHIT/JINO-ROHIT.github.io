@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collective Communication for Multiple GPUs</title>
+
+    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body);"></script>
+
+  </head>
+
+  <body class="bg-orange-50 text-gray-900 w-full max-w-3xl mx-auto px-5 md:px-0 pb-20">
+    <nav class="flex justify-between items-center py-6 border-b border-gray-300">
+      <h1 class="font-serif text-3xl font-bold">Jino Rohit</h1>
+      <div class="flex gap-6 text-sm">
+        <a href="../index.html" class="hover:text-orange-600 transition">Home</a>
+        <a href="./blog.html" class="hover:text-orange-600 transition">Blogs</a>
+        <a href="../projects/projects.html" class="hover:text-orange-600 transition">Projects</a>
+      </div>
+    </nav>
+
+    <header class="mt-12">
+      <h1 class="font-serif text-4xl font-bold leading-tight text-gray-950">
+        Collective Communication for Multiple GPUs
+      </h1>
+      <p class="text-sm text-gray-600 mt-4 italic">June 11, 2026 • 10 min read</p>
+    </header>
+
+    <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
+
+      <section class="space-y-4">
+        <p>
+          As you scale your training or inference to multiple GPUs, you need to find a way to communicate across these GPUs.
+          Libraries like NCCL specialized in providing optimized primitives to communicate across GPUs and these are called collective communication.
+        </p>
+
+        <p>
+          Now the type and volume of message shared across the GPUs differ a lot in training vs inference but the primitives remain the same. 
+          In this post, we will cover all the important collective primitives you need to start scaling to multiple GPUs!
+        </p>
+
+
+      </section>
+
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Communication Model
+        </h2>
+
+        <p>
+          The latency of communication (between GPUs and/or nodes) can be modeled as:
+        </p>
+
+        <p class="text-center my-6">
+          $$\alpha + n\beta, \quad \beta = \frac{1}{B}$$
+        </p>
+
+        <p>
+          where:
+        </p>
+
+        <ul class="list-disc pl-6 space-y-2">
+          <li><strong>α</strong> is the initial cost of setting up the connection</li>
+          <li><strong>β</strong> represents the inverse bandwidth</li>
+          <li><strong>n</strong> is the message size</li>
+          <li><strong>B</strong> is the bandwidth</li>
+        </ul>
+
+        <div class="mt-6 space-y-4">
+          
+          <div class="p-4 rounded-lg space-y-3">
+            <p>
+              <strong>Small Message Size</strong> (α >> nβ): Latency (α) dominates; the focus is on reducing communication latency.
+            </p>
+            <p>
+              <strong>Large Message Size</strong> (α << nβ): Bandwidth utilization (nβ) dominates; the focus is on maximizing bandwidth.
+            </p>
+          </div>
+        </div>
+
+        <h2 class="text-lg font-semibold text-gray-950 mt-6">Communication Algorithms</h3>
+        
+        <p>There are way major algorithms to implement the collective algorithms - MST and Ring algorithm. </p>
+
+        <h3 class="font-serif font-bold leading-tight text-gray-950">Minimum Spanning Tree (MST)</h3>
+        <p>
+            MST algorithm is designed to be very efficient for smaller messages, ie: for models that prioritize low latency. It uses a spanning tree structure to
+            enforce minimal rounds of data transfer but doesnot fully utilize the available bandwidth.
+            It assumes a network where each node can communicate with only one other node at a time.
+        </p>
+
+        <p> Dont worry if this doesn't make sense yet, we will look at a example comparing both MST and ring and try to understand the tradeoffs shortly.</p>
+
+        <h3 class="font-serif font-bold leading-tight text-gray-950">Ring</h3>
+        <p>
+            In ring algorithm, each GPU is organized in a ring like fashion and communicates only with its two neighbors at once. 
+            1. message split - a large message is split into equal N chunks. each of the P GPU in the ring gets N/P data.
+            2. data transfer - each GPU now moves its chunk to its next immediate neighbor. think of this like receiving chunk from the left side GPU and sending
+            chunk to the right side GPU.
+            this way every single GPU is performing something and bandwith is always highly optimized.
+        </p>
+
+        <p>Now as promised, lets look at an example where we want to send a message from one GPU to all the other GPUs in the node.</p>
+
+        <!-- <ul class="list-disc pl-6 space-y-3">
+          <li><strong>Minimum Spanning Tree Algorithm</strong> - Optimized for small messages. Constructs a spanning tree connectivity to minimize the total number of α terms.</li>
+          <li><strong>Ring Algorithm</strong> - Optimized for large messages. Each process communicates with its neighbor in a ring structure, ensuring full utilization of device parallelism and bandwidth.</li>
+        </ul> -->
+
+        <p>When it comes to ML systems both for training and inference setup, most of the messages are bandwith bound, because we have to more around massive
+            weights, activations, tensor shards etc.
+        </p>
+
+
+
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Wrapping Up
+        </h2>
+
+        <p>
+          With all of this you should be able to understand the different collective primitives and the tradeoffs of using each operation 
+          and scale your experiments beyond a single GPU.
+        </p>
+
+        <p>In the next couple of blogs, I will focus more on distributed techniques and more production ready libraries like torchtitan.</p>
+
+      </section>
+
+    </article>
+
+    <script>
+      lucide.createIcons();
+    </script>
+  </body>
+</html>
