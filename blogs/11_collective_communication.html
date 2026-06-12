@@ -54,11 +54,11 @@
         </h2>
 
         <p>
-          The latency of communication (between GPUs and/or nodes) can be modeled as:
+          The total time to send a message across GPUs can be modeled as:
         </p>
 
         <p class="text-center my-6">
-          $$\alpha + n\beta, \quad \beta = \frac{1}{B}$$
+          $$\text{total time} = \alpha + n\beta, \quad \beta = \frac{1}{B}$$
         </p>
 
         <p>
@@ -66,23 +66,35 @@
         </p>
 
         <ul class="list-disc pl-6 space-y-2">
-          <li><strong>α</strong> is the initial cost of setting up the connection</li>
-          <li><strong>β</strong> represents the inverse bandwidth</li>
-          <li><strong>n</strong> is the message size</li>
-          <li><strong>B</strong> is the bandwidth</li>
+          <li><strong>α</strong> (alpha) is the fixed overhead per communication like the time to set up the connection, handshake etc. It does <em>not</em> depend on how much data you send.</li>
+          <li><strong>β</strong> (beta) is the time per byte. it is the inverse of bandwidth (\(\beta = 1/B\)).</li>
+          <li><strong>n</strong> is the message size in bytes.</li>
+          <li><strong>B</strong> is the bandwidth of the link (e.g. 900 GB/s for NVLink).</li>
         </ul>
 
-        <div class="mt-6 space-y-4">
-          
-          <div class="p-4 rounded-lg space-y-3">
-            <p>
-              <strong>Small Message Size</strong> (α >> nβ): Latency (α) dominates; the focus is on reducing communication latency.
-            </p>
-            <p>
-              <strong>Large Message Size</strong> (α << nβ): Bandwidth utilization (nβ) dominates; the focus is on maximizing bandwidth.
-            </p>
-          </div>
-        </div>
+        <p>
+         Remember this line: <strong>α is a fixed cost you pay once per message, and nβ grows with the message size.</strong>
+        </p>
+
+        <p>Here's an example that should help you understand this more clearly. On an NVIDIA H100 with NVLink:</p>
+
+        <ul class="list-disc pl-6 space-y-2">
+          <li>α ≈ 10 μs (the setup cost)</li>
+          <li>B ≈ 900 GB/s, so β ≈ 1.1 picoseconds per byte</li>
+        </ul>
+
+        <p>Now compare two scenarios:</p>
+
+        <ul class="list-disc pl-6 space-y-2">
+          <li><strong>Small message (1 KB):</strong> α = 10 μs, nβ = 1024 × 1.1 ps ≈ 1.1 ns. The α term is <em>10,000x larger</em>. The fixed overhead dominates compared to the actual data transfer.</li>
+          <li><strong>Large message (1 GB):</strong> α = 10 μs, nβ = 1e9 × 1.1 ps ≈ 1.1 ms. The nβ term is <em>100x larger</em>. The bandwidth dominates, and the setup cost is negligible.</li>
+        </ul>
+
+        <p>
+          This tradeoff drives which algorithm you pick. When messages are small, you want to minimize the number
+          of communication rounds (each round costs an α). When messages are large, you want to keep the bus fully
+          utilized by pipelining data - the fixed overhead per round barely matters.
+        </p>
 
         <h2 class="text-2xl font-serif font-bold text-gray-950">Communication Algorithms</h2>
         
@@ -187,7 +199,7 @@
 
         <p>
           Scatter splits a tensor held by one GPU into equal chunks and sends each chunk to a different GPU. Each GPU
-          ends up with a unique piece of the original data — no two GPUs hold the same chunk.
+          ends up with a unique piece of the original data - no two GPUs hold the same chunk.
         </p>
 
         <img src="artifacts/collective_communication/scatter.png" class="mx-auto my-4" />
