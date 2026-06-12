@@ -86,16 +86,16 @@
 
         <h2 class="text-2xl font-serif font-bold text-gray-950">Communication Algorithms</h2>
         
-        <p>There are two major algorithms to implement the collective algorithms - MST and Ring algorithm. </p>
+        <p>There are two major algorithms to implement the communication algorithms - MST and Ring algorithm. </p>
 
         <h3 class="font-serif font-bold leading-tight text-gray-950">Minimum Spanning Tree (MST)</h3>
         <p>
             MST algorithm is designed to be very efficient for smaller messages, ie: for models that prioritize low latency. It uses a spanning tree structure to
-            enforce minimal rounds of data transfer but doesnot fully utilize the available bandwidth.
+            enforce minimal rounds of data transfer but does not fully utilize the available bandwidth.
             It assumes a network where each node can communicate with only one other node at a time.
         </p>
 
-        <p> Dont worry if this doesn't make sense yet, we will look at a example comparing both MST and ring and try to understand the tradeoffs shortly.</p>
+        <p>Don't worry if this doesn't make sense yet, we will look at an example comparing both MST and ring and try to understand the tradeoffs shortly.</p>
 
         <h3 class="font-serif font-bold leading-tight text-gray-950">Ring</h3>
         <p>
@@ -123,7 +123,7 @@
             <li><strong>Round 1</strong> - GPU 0 sends to GPU 1 and 2.</li>
             <li><strong>Round 2</strong> - GPU 1 sends to GPU 3.</li>
             <li><strong>Round 3</strong> - GPU 2 sends to GPU 4 and 5. </li>
-            <li><strong>Total Rounds of Communication</strong> - log(6) = 2.5</li>
+            <li><strong>Total Rounds of Communication</strong> - log₂(6) ≈ 2.585 rounds</li>
         </ul>
 
         <h3 class="font-serif font-bold leading-tight text-gray-950"> Broadcast in Ring </h3>
@@ -134,22 +134,130 @@
             <li><strong>Round 1</strong> - GPU 0 sends to GPU 1.</li>
             <li><strong>Round 2</strong> - GPU 1 sends to GPU 2.</li>
             <li><strong>Round 3</strong> - GPU 2 sends to GPU 3. </li>
-            <li><strong>Total Rounds of Communication</strong> = N - 1 = 3</li>
+            <li><strong>Total Rounds of Communication</strong> = N - 1 = 3 rounds</li>
         </ul>
 
         <p>You can see how MST immediately optimizes for latency where the rounds of communication are lesser compared to ring algorithms.
-          Ring algorithms on the other hand focusses on improving the bandwith utilization by chunking its data and always having every single node
+          Ring algorithms on the other hand focus on improving the bandwidth utilization by chunking its data and always having every single node
           performing something.
         </p>
 
-        <p>When it comes to ML systems both for training and inference setup, most of the messages are bandwith bound, because we have to more around massive
+        <p>When it comes to ML systems both for training and inference setup, most of the messages are bandwidth bound, because we have to move around massive
             weights, activations, tensor shards etc.
         </p>
 
-        <p>Cool, now that we have the intuition locked down, its time to understand the collective communications.</p>
+        <p>Cool, now that we have the intuition locked down, it's time to understand the collective communications.</p>
 
+      </section>
 
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Broadcast</h2>
 
+        <p>
+          Broadcast sends data from one GPU (the root) to every other GPU in the group. Every GPU ends up with an
+          identical copy of the data. We already saw how this works with MST and ring above.
+        </p>
+
+        <img src="artifacts/collective_communication/broadcast.png" class="mx-auto my-4" />
+
+        <p>
+          In training, broadcast is used to distribute model parameters at the start so all replicas
+          start from the same initial state.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Reduce</h2>
+
+        <p>
+          Reduce takes a tensor from every GPU and applies an element-wise operation (sum, mean, min, max) to
+          produce a single result tensor on one root GPU.
+        </p>
+
+        <img src="artifacts/collective_communication/reduce.png" class="mx-auto my-4" />
+
+        <p>
+          This is used to aggregate loss values across GPUs, or to sum gradients before applying the optimizer.
+          The result lives on a single GPU.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Scatter</h2>
+
+        <p>
+          Scatter splits a tensor held by one GPU into equal chunks and sends each chunk to a different GPU. Each GPU
+          ends up with a unique piece of the original data — no two GPUs hold the same chunk.
+        </p>
+
+        <img src="artifacts/collective_communication/scatter.png" class="mx-auto my-4" />
+
+        <p>
+          In data parallelism, scatter is the natural way to distribute different micro-batches of input data across GPUs.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Gather</h2>
+
+        <p>
+          Gather is the inverse of scatter. Every GPU sends its tensor to a single root GPU, which concatenates
+          them into one larger tensor.
+        </p>
+
+        <img src="artifacts/collective_communication/gather.png" class="mx-auto my-4" />
+
+        <p>
+          You typically use gather to collect model outputs or activations on rank 0 for checkpointing,
+          logging, or evaluation.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Allgather</h2>
+
+        <p>
+          Allgather is like gather followed by broadcast. Every GPU sends its data to all other GPUs, and every GPU
+          ends up with the complete concatenated set of data from all GPUs.
+        </p>
+
+        <img src="artifacts/collective_communication/allgather.png" class="mx-auto my-4" />
+
+        <p>
+          This is critical in tensor parallelism where each GPU holds a shard of a tensor but the full tensor is
+          needed for certain operations like attention. Allgather lets every GPU reconstruct the full tensor
+          without a central bottleneck.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Reduce Scatter</h2>
+
+        <p>
+          Reduce Scatter combines reduce and scatter into a single operation. The tensors from all GPUs are
+          reduced element-wise, and the result is split into chunks with each GPU receiving one chunk.
+        </p>
+
+        <img src="artifacts/collective_communication/reduce_scatter.png" class="mx-auto my-4" />
+
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Allreduce</h2>
+
+        <p>
+          Allreduce is one of the most important collective communication in distributed training. It reduces tensors from
+          all GPUs (sum or mean) and broadcasts the result so every GPU ends up with the exact same reduced tensor.
+        </p>
+
+        <img src="artifacts/collective_communication/all_reduce.png" class="mx-auto my-4" />
+
+        <p>
+          In DDP, allreduce is the backbone of gradient synchronisation. Every GPU computes local gradients, and
+          allreduce ensures every replica applies the same weight update.
+        </p>
+
+      </section>
 
       <section class="space-y-4">
         <h2 class="text-2xl font-serif font-bold text-gray-950">
@@ -159,6 +267,12 @@
         <p>
           With all of this you should be able to understand the different collective primitives and the tradeoffs of using each operation 
           and scale your experiments beyond a single GPU.
+        </p>
+
+        <p>
+          The key takeaway is that most ML workloads are bandwidth-bound, which is why ring-based algorithms
+          dominate production systems. MST-based algorithms are useful when latency is the bottleneck and
+          message sizes are small.
         </p>
 
         <p>In the next couple of blogs, I will focus more on distributed techniques and more production ready libraries like torchtitan.</p>
