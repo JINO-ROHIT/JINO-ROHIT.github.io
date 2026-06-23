@@ -74,12 +74,238 @@
       </section>
 
       <section class="space-y-4">
+
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          The Three Core Objects
+        </h2>
+
+        <p>
+          FX Graph has exactly three concepts you need to understand - <code class="bg-stone-200 px-1 rounded">Graph</code>, <code class="bg-stone-200 px-1 rounded">Node</code>, and <code class="bg-stone-200 px-1 rounded">GraphModule</code>.
+        </p>
+
+        <div class="overflow-x-auto">
+          <table class="w-full border-collapse border border-gray-300">
+            <thead>
+              <tr class="bg-orange-100">
+                <th class="border border-gray-300 px-4 py-2 text-left">Concept</th>
+                <th class="border border-gray-300 px-4 py-2 text-left">Meaning</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="border border-gray-300 px-4 py-2 font-mono">Graph</td>
+                <td class="border border-gray-300 px-4 py-2">A directed graph consisting of several nodes that represents the entire computation.</td>
+              </tr>
+              <tr class="bg-orange-50">
+                <td class="border border-gray-300 px-4 py-2 font-mono">Node</td>
+                <td class="border border-gray-300 px-4 py-2">An operation node in the graph (input, operator call, output, etc.)</td>
+              </tr>
+              <tr>
+                <td class="border border-gray-300 px-4 py-2 font-mono">GraphModule</td>
+                <td class="border border-gray-300 px-4 py-2">A subclass of nn.Module that wraps Graph</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          Let me show you what I mean. Here is a simple model traced with <code class="bg-stone-200 px-1 rounded">torch.fx.symbolic_trace</code>:
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>import torch
+import torch.fx
+
+class MyModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(4, 8)
+
+    def forward(self, x):
+        return torch.relu(self.linear(x))
+
+gm = torch.fx.symbolic_trace(MyModel())
+gm.graph.print_tabular()</code></pre>
+
+        <p>This prints:</p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>opcode         name    target                 args         kwargs
+-------------  ------  ---------------------  -----------  --------
+placeholder    x       x                      ()           {}
+call_module    linear  linear                 (x,)         {}
+call_function  relu    &lt;built-in fn relu&gt;     (linear,)    {}
+output         output  output                 (relu,)      {}</code></pre>
+
+        <p>
+          FX Graph flattens the Python code into a series of nodes. This might seem like a lot at first glance but dont worry we will keep unpacking each field.
+        </p>
+
+        <h3 class="text-xl font-serif font-bold text-gray-950">Graph</h3>
+
+        <p>
+          A torch.fx.Graph is a computation graph that internally holds a sequence of Nodes in topological order.
+          You can print it to see the full structure:
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>print(gm.graph)</code></pre>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>graph():
+    %x : [num_users=1] = placeholder[target=x]
+    %linear : [num_users=1] = call_module[target=linear](args = (%x,), kwargs = {})
+    %relu : [num_users=1] = call_function[target=torch.relu](args = (%linear,), kwargs = {})
+    return relu</code></pre>
+
+        <p>
+          This is like the textual representation for the FX graph. (add more explanation here)
+        </p>
+
+        <h3 class="text-xl font-serif font-bold text-gray-950">Node</h3>
+
+        <p>
+          Node is the basic unit that represents an input, a function call, or an output.
+        </p>
+
       </section>
+
+
+      <section class="space-y-4">
+
+        <p>
+          Every Node has six core fields you will constantly be looking at. Here's a quick reference:
+        </p>
+
+        <div class="overflow-x-auto">
+          <table class="w-full border-collapse border border-gray-300">
+            <thead>
+              <tr class="bg-orange-100">
+                <th class="border border-gray-300 px-4 py-2 text-left">Field</th>
+                <th class="border border-gray-300 px-4 py-2 text-left">What it tells you</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="border border-gray-300 px-4 py-2 font-mono">node.op</td>
+                <td class="border border-gray-300 px-4 py-2">What type of node this is (placeholder, get_attr, call_function, etc.)</td>
+              </tr>
+              <tr class="bg-orange-50">
+                <td class="border border-gray-300 px-4 py-2 font-mono">node.target</td>
+                <td class="border border-gray-300 px-4 py-2"><em>What</em> this node actually calls (function, module name, method name, etc.)</td>
+              </tr>
+              <tr>
+                <td class="border border-gray-300 px-4 py-2 font-mono">node.name</td>
+                <td class="border border-gray-300 px-4 py-2">Temporary variable name in the graph</td>
+              </tr>
+              <tr class="bg-orange-50">
+                <td class="border border-gray-300 px-4 py-2 font-mono">node.args</td>
+                <td class="border border-gray-300 px-4 py-2">Inputs to this node</td>
+              </tr>
+              <tr>
+                <td class="border border-gray-300 px-4 py-2 font-mono">node.kwargs</td>
+                <td class="border border-gray-300 px-4 py-2">Keyword arguments</td>
+              </tr>
+              <tr class="bg-orange-50">
+                <td class="border border-gray-300 px-4 py-2 font-mono">node.users</td>
+                <td class="border border-gray-300 px-4 py-2">Which nodes use this node's output</td>
+              </tr>
+              <tr>
+                <td class="border border-gray-300 px-4 py-2 font-mono">node.meta</td>
+                <td class="border border-gray-300 px-4 py-2">Metadata dict</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+            <section class="space-y-4">
+
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          How FX Graphs are Built
+        </h2>
+
+        <p>
+          So how torch.fx actually turn python code into this graph?
+          It does this by a concept called <strong>symbolic tracing</strong>.
+        </p>
+
+        <h3 class="text-xl font-serif font-bold text-gray-950">Symbolic Tracing</h3>
+
+        <p> first talk about symbolic tracing, then proxies </p>
+        
+        <p>
+          Instead of feeding real tensors through your model, torch.fx feeds <strong>Proxy</strong> objects.
+        </p>
+
+        <h3 class="text-xl font-serif font-bold text-gray-950">Limitations of Symbolic Tracing</h3>
+
+        <p>
+          <strong>1. Dynamic control flow</strong> - if the condition depends on tensor data, it can't be traced
+          because Proxies don't have real values to evaluate the condition:
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>def forward(self, x):
+    if x.sum() &gt; 0:     # Proxy can't evaluate this!
+        return torch.relu(x)
+    else:
+        return torch.neg(x)</code></pre>
+
+        <p>
+          Only one branch is traced (the one taken during tracing), giving you an incorrect graph.
+        </p>
+
+        <p>
+          <strong>2. Non-torch Python functions</strong> - plain Python functions aren't intercepted:
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>from math import sqrt
+
+def normalize(x):
+    return x / sqrt(len(x))
+
+traced = torch.fx.symbolic_trace(normalize)  # fails!</code></pre>
+
+        <p>
+          You can fix this with <code class="bg-stone-200 px-1 rounded">torch.fx.wrap</code>:
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>torch.fx.wrap('len')
+torch.fx.wrap('sqrt')
+traced = torch.fx.symbolic_trace(normalize)  # works</code></pre>
+
+        <p>
+          <strong>3. Static control flow is fine</strong> - if the condition depends on module attributes
+          (not tensor data), tracing works perfectly:
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>class MyModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.do_activation = False
+        self.linear = torch.nn.Linear(512, 512)
+
+    def forward(self, x):
+        x = self.linear(x)
+        if self.do_activation:       # static - not data dependent
+            x = torch.relu(x)
+        return x
+
+# This traces correctly</code></pre>
+
+      </section>
+
 
       <section class="space-y-4">
         <h2 class="text-2xl font-serif font-bold text-gray-950">
           Wrapping Up
         </h2>
+
+        <p>
+          FX Graphs are the backbone of the entire PyTorch 2.0 compilation stack. Without understanding this you are going to get lost the moment 
+          you step into inductor or AOTAutograd.
+        </p>
+
+        <p>
+          In the next post, we will look at <strong>TorchDynamo</strong> - the bytecode-level JIT that
+          actually captures these graphs at runtime.
+        </p>
 
       </section>
 
