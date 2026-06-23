@@ -155,27 +155,7 @@ output         output  output                 (relu,)      {}</code></pre>
     return relu</code></pre>
 
         <p>
-          This is the textual representation of the FX Graph. Lets break down each part:
-        </p>
-
-        <p>
-          1. num_users=1 tells you how many nodes read this value. If a value is used multiple times,
-          you might see num_users=2. This is useful for dead code elimination where if num_users</code> drops to 0,
-          the node can be removed.
-        </p>
-
-        <p>
-          2. the placeholder[target=x] is an input node to the graph.
-        </p>
-
-        <p>
-          3. args are the inputs to this node. linear depends on x
-          and relu depends on linear. If you follow the args backwards from any node,
-          you can trace the full dependency chain all the way to the inputs.
-        </p>
-
-        <p>
-          if you put it all together, this graph says "take the input x, call self.linear(x), call torch.relu on the result, and return it".
+          This is the textual representation of the FX Graph. More on this in the next section.
         </p>
 
         <h3 class="text-xl font-serif font-bold text-gray-950">Node</h3>
@@ -185,49 +165,134 @@ output         output  output                 (relu,)      {}</code></pre>
         </p>
 
         <p>
-          Every Node has six core fields you will constantly be looking at. Here's a quick reference:
+          Every Node has mainly 6 fields you will interact with.
+        </p>
+
+        <h3 class="text-xl font-serif font-bold text-gray-950">node.op</h3>
+
+        <p>
+          <code class="bg-stone-200 px-1 rounded">node.op</code> tells you the broad category
+          of the node. There are exactly six possible values:
+        </p>
+
+        <ul class="list-disc pl-6 space-y-2">
+          <li><code class="bg-stone-200 px-1 rounded">placeholder</code> - graph input</li>
+          <li><code class="bg-stone-200 px-1 rounded">get_attr</code> - reading a parameter for instance</li>
+          <li><code class="bg-stone-200 px-1 rounded">call_function</code> - calling a torch op or Python function</li>
+          <li><code class="bg-stone-200 px-1 rounded">call_method</code> - calling a method on a tensor (like <code class="bg-stone-200 px-1 rounded">.view()</code>)</li>
+          <li><code class="bg-stone-200 px-1 rounded">call_module</code> - calling a submodule (like <code class="bg-stone-200 px-1 rounded">self.linear</code>)</li>
+          <li><code class="bg-stone-200 px-1 rounded">output</code> - graph output</li>
+        </ul>
+
+
+        <h3 class="text-xl font-serif font-bold text-gray-950">node.name</h3>
+
+        <p>
+          <code class="bg-stone-200 px-1 rounded">node.name</code> is the temporary variable name you see with the <code class="bg-stone-200 px-1 rounded">%</code> prefix
+          when you print the graph. For example:
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>%add = call_function[target=operator.add](args = (%x, %y), kwargs = {})
+# node.name == "add"</code></pre>
+
+        <h3 class="text-xl font-serif font-bold text-gray-950">node.args</h3>
+
+        <p>
+          <code class="bg-stone-200 px-1 rounded">node.args</code> is a tuple of Nodes that this node depends on.
+          This is how you trace the dataflow:
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>%add = call_function[target=operator.add](args = (%x, %y), kwargs = {})
+# add depends on x and y
+
+%relu = call_function[target=torch.relu](args = (%add,), kwargs = {})
+# relu depends on add</code></pre>
+
+
+        <h3 class="text-xl font-serif font-bold text-gray-950">node.kwargs</h3>
+
+        <p>
+          Same as args but for keyword parameters.
+
+        <h3 class="text-xl font-serif font-bold text-gray-950">node.users</h3>
+
+        <p>
+           <code class="bg-stone-200 px-1 rounded">node.users</code> is the number of times this node is being used by another node.
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code># Input x is used by 2 nodes
+%x : [num_users=2] = placeholder[target=x]
+# ...
+%add = call_function[target=operator.add](args = (%x, %y))
+%neg = call_function[target=torch.neg](args = (%x,))
+
+# node.users[x] would map to {add: 1, neg: 1}</code></pre>
+
+        <p>
+          This is essential for graph transforms. Before deleting a node, you must check that
+          <code class="bg-stone-200 px-1 rounded">len(node.users) == 0</code> or redirect its users to a different node first.
+          It is also how you detect dead code.
+        </p>
+
+        <h3 class="text-xl font-serif font-bold text-gray-950">node.target</h3>
+
+        <p>
+          This is the most important field - and also the most confusing, because its meaning
+          <em>depends on node.op</em>. You cannot read target in isolation.
         </p>
 
         <div class="overflow-x-auto">
           <table class="w-full border-collapse border border-gray-300">
             <thead>
               <tr class="bg-orange-100">
-                <th class="border border-gray-300 px-4 py-2 text-left">Field</th>
-                <th class="border border-gray-300 px-4 py-2 text-left">What it tells you</th>
+                <th class="border border-gray-300 px-4 py-2 text-left">node.op</th>
+                <th class="border border-gray-300 px-4 py-2 text-left">target means</th>
+                <th class="border border-gray-300 px-4 py-2 text-left">example</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td class="border border-gray-300 px-4 py-2 font-mono">node.op</td>
-                <td class="border border-gray-300 px-4 py-2">What type of node this is (placeholder, get_attr, call_function, etc.)</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">placeholder</td>
+                <td class="border border-gray-300 px-4 py-2">the argument name</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">"x"</td>
               </tr>
               <tr class="bg-orange-50">
-                <td class="border border-gray-300 px-4 py-2 font-mono">node.target</td>
-                <td class="border border-gray-300 px-4 py-2"><em>What</em> this node actually calls (function, module name, method name, etc.)</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">get_attr</td>
+                <td class="border border-gray-300 px-4 py-2">dot-separated path to the attribute</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">"linear.weight"</td>
               </tr>
               <tr>
-                <td class="border border-gray-300 px-4 py-2 font-mono">node.name</td>
-                <td class="border border-gray-300 px-4 py-2">Temporary variable name in the graph</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">call_function</td>
+                <td class="border border-gray-300 px-4 py-2">the actual function object</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">torch.relu, operator.add</td>
               </tr>
               <tr class="bg-orange-50">
-                <td class="border border-gray-300 px-4 py-2 font-mono">node.args</td>
-                <td class="border border-gray-300 px-4 py-2">Inputs to this node</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">call_method</td>
+                <td class="border border-gray-300 px-4 py-2">the method name (a string)</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">"view", "permute"</td>
               </tr>
               <tr>
-                <td class="border border-gray-300 px-4 py-2 font-mono">node.kwargs</td>
-                <td class="border border-gray-300 px-4 py-2">Keyword arguments</td>
-              </tr>
-              <tr class="bg-orange-50">
-                <td class="border border-gray-300 px-4 py-2 font-mono">node.users</td>
-                <td class="border border-gray-300 px-4 py-2">Which nodes use this node's output</td>
-              </tr>
-              <tr>
-                <td class="border border-gray-300 px-4 py-2 font-mono">node.meta</td>
-                <td class="border border-gray-300 px-4 py-2">Metadata dict</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">call_module</td>
+                <td class="border border-gray-300 px-4 py-2">submodule path</td>
+                <td class="border border-gray-300 px-4 py-2 font-mono">"linear", "block.0"</td>
               </tr>
             </tbody>
           </table>
         </div>
+
+        <p>
+          Take <code class="bg-stone-200 px-1 rounded">target="linear"</code>. If op is <code class="bg-stone-200 px-1 rounded">call_module</code>, it means "call self.linear".
+          If op is <code class="bg-stone-200 px-1 rounded">get_attr</code>, it means "read self.linear" (which would error since linear is a module, not a tensor).
+          So always <strong>check op before target</strong>.
+        </p>
+
+
+        <h3 class="text-xl font-serif font-bold text-gray-950">node.meta</h3>
+
+        <p>
+          <code class="bg-stone-200 px-1 rounded">node.meta</code> holds metadata information about the node.
+        </p>
+
       </section>
 
             <section class="space-y-4">
