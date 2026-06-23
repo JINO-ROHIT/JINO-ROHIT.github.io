@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>torch fx graphs</title>
+
+    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body);"></script>
+
+  </head>
+
+  <body class="bg-orange-50 text-gray-900 w-full max-w-3xl mx-auto px-5 md:px-0 pb-20">
+    <nav class="flex justify-between items-center py-6 border-b border-gray-300">
+      <h1 class="font-serif text-3xl font-bold">Jino Rohit</h1>
+      <div class="flex gap-6 text-sm">
+        <a href="../index.html" class="hover:text-orange-600 transition">Home</a>
+        <a href="./blog.html" class="hover:text-orange-600 transition">Blogs</a>
+        <a href="../projects/projects.html" class="hover:text-orange-600 transition">Projects</a>
+      </div>
+    </nav>
+
+    <header class="mt-12">
+      <h1 class="font-serif text-4xl font-bold leading-tight text-gray-950">
+        Torch Internal (Part 1) - FX Graphs
+      </h1>
+      <p class="text-sm text-gray-600 mt-4 italic">June 23, 2026 • 10 min read</p>
+    </header>
+
+    <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
+
+      <section class="space-y-4">
+        <p>
+          This is a new blog series where I will try to unpack the ecosystem across pytorch and pytorch compile. Ive always wanted an excuse to dig deep and find
+          out why and how torch does what it does and how excellently it does this. Hopefully by the end of the blog series, you will have a deeper understanding
+          of how pytorch 2.0 ecosystem works and are able to debug programs more comfortably.
+        </p>
+
+      </section>
+
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          What is even a FX graph? 
+        </h2>
+
+        <p>
+          What's a FX graph? Why should I care? I want to read torch.compile and skip this boring graphs.
+        </p>
+
+        <p>
+          Bad news! understanding fx graphs are fundamental to understanding every other components of the compile ecosystem. From dynamo to inductor, each of them make
+          use of fx graph in some way or the other. Good news! Im going to unpack everything in one blog!
+        </p>
+
+        <p>
+          FX Graph is an intermediate representation (IR) provided by a PyTorch module that transforms Python code into a directed acyclic graph (DAG).
+        </p>
+
+        <h2 class="text-2xl font-serif font-bold text-gray-950">The good ol' DAGs</h2>
+        
+        <p>DAGs stands for Directed Acyclic Graph that is basically made up on nodes and directed edges. the directed means every node is pointing to another node
+          that has a meaning
+        </p>
+
+        <p> Here's a cool DAG</p>
+
+        <img src="artifacts/fx_graphs/dag.png" class="mx-auto my-4" />
+
+      </section>
+
+      <section class="space-y-4">
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Wrapping Up
+        </h2>
+
+      </section>
+
+    </article>
+
+    <script>
+      lucide.createIcons();
+    </script>
+  </body>
+</html>
