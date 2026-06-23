@@ -142,7 +142,7 @@ output         output  output                 (relu,)      {}</code></pre>
         <h3 class="text-xl font-serif font-bold text-gray-950">Graph</h3>
 
         <p>
-          A torch.fx.Graph is a computation graph that internally holds a sequence of Nodes in topological order.
+          A torch.fx.Graph is a computation graph that internally holds a sequence of nodes.
           You can print it to see the full structure:
         </p>
 
@@ -155,7 +155,27 @@ output         output  output                 (relu,)      {}</code></pre>
     return relu</code></pre>
 
         <p>
-          This is like the textual representation for the FX graph. (add more explanation here)
+          This is the textual representation of the FX Graph. Lets break down each part:
+        </p>
+
+        <p>
+          1. num_users=1 tells you how many nodes read this value. If a value is used multiple times,
+          you might see num_users=2. This is useful for dead code elimination where if num_users</code> drops to 0,
+          the node can be removed.
+        </p>
+
+        <p>
+          2. the placeholder[target=x] is an input node to the graph.
+        </p>
+
+        <p>
+          3. args are the inputs to this node. linear depends on x
+          and relu depends on linear. If you follow the args backwards from any node,
+          you can trace the full dependency chain all the way to the inputs.
+        </p>
+
+        <p>
+          if you put it all together, this graph says "take the input x, call self.linear(x), call torch.relu on the result, and return it".
         </p>
 
         <h3 class="text-xl font-serif font-bold text-gray-950">Node</h3>
@@ -163,11 +183,6 @@ output         output  output                 (relu,)      {}</code></pre>
         <p>
           Node is the basic unit that represents an input, a function call, or an output.
         </p>
-
-      </section>
-
-
-      <section class="space-y-4">
 
         <p>
           Every Node has six core fields you will constantly be looking at. Here's a quick reference:
@@ -229,7 +244,7 @@ output         output  output                 (relu,)      {}</code></pre>
         <h3 class="text-xl font-serif font-bold text-gray-950">Symbolic Tracing</h3>
 
         <p> first talk about symbolic tracing, then proxies </p>
-        
+
         <p>
           Instead of feeding real tensors through your model, torch.fx feeds <strong>Proxy</strong> objects.
         </p>
