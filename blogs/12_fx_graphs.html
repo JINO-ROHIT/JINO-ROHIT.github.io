@@ -405,13 +405,11 @@ traced = torch.fx.symbolic_trace(normalize)  # fails!</code></pre>
         </h2>
 
         <p>
-          Understanding FX Graphs are super important to understand the entire PyTorch 2.0 compilation stack. Without understanding this you are going to get lost the moment 
-          you step into inductor or AOTAutograd.
+          Understanding FX Graphs are the first step to understanding the entire PyTorch 2.0 compilation stack. So, good job on making it till here.
         </p>
 
         <p>
-          In the next post, we will look at <strong>TorchDynamo</strong> - the bytecode-level JIT that
-          actually captures these graphs at runtime.
+          In the next post, we will look at <strong>TorchDynamo</strong> - the bytecode-level JIT and how it handles this a bit differently.
         </p>
 
       </section>
