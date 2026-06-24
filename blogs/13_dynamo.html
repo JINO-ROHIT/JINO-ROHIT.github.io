@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>torch dynamo</title>
+
+    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body);"></script>
+
+  </head>
+
+  <body class="bg-orange-50 text-gray-900 w-full max-w-3xl mx-auto px-5 md:px-0 pb-20">
+    <nav class="flex justify-between items-center py-6 border-b border-gray-300">
+      <h1 class="font-serif text-3xl font-bold">Jino Rohit</h1>
+      <div class="flex gap-6 text-sm">
+        <a href="../index.html" class="hover:text-orange-600 transition">Home</a>
+        <a href="./blog.html" class="hover:text-orange-600 transition">Blogs</a>
+        <a href="../projects/projects.html" class="hover:text-orange-600 transition">Projects</a>
+      </div>
+    </nav>
+
+    <header class="mt-12">
+      <h1 class="font-serif text-4xl font-bold leading-tight text-gray-950">
+        Torch Internal (Part 2) - TorchDynamo
+      </h1>
+      <p class="text-sm text-gray-600 mt-4 italic">June 24, 2026 • 10 min read</p>
+    </header>
+
+    <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
+
+      <section class="space-y-4">
+        <p>
+          In the last post, we saw how <strong>torch.fx</strong> turns python code into a graph using <strong>symbolic tracing</strong> with proxy objects.
+        </p>
+        <p>
+         TorchDynamo on the other hand, is a JIT compiler that operates at the Python bytecode level, captures a computation graph and hands it to a backend for further optimization.
+        </p>
+        <p>
+          In this post we will pay attention to how dynamo works and how its different from symbolic tracing.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          What Makes Dynamo Different
+        </h2>
+        <p>
+          Dynamo is a tracer that given a function and its inputs, executes the function and records a <em>linear sequence of instructions</em> (without control flow) into a graph. Unlike FX's symbolic tracing which uses Proxy objects, Dynamo works by <strong>simulating the Python virtual machine</strong> at the bytecode level.
+        </p>
+
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Python Bytecode
+        </h2>
+
+        <p>
+          Before we can understand Dynamo, we need to understand how Python actually runs code. Python compiles functions into <strong>bytecode</strong> which is a sequence of low-level instructions for the Python virtual machine (PVM).
+        </p>
+
+        <p>When a function is called, Python creates a <strong>frame</strong> that stores - </p>
+
+        <ul class="list-disc pl-6 space-y-2">
+          <li>the bytecode instructions</li>
+          <li>local variables</li>
+          <li>global variables</li>
+          <li>the evaluation stack</li>
+          <li>the block stack</li>
+        </ul>
+
+        <p>The PVM maintains three stacks - </p>
+
+        <div class="overflow-x-auto">
+          <table class="w-full border-collapse border border-gray-300">
+            <thead>
+              <tr class="bg-orange-100">
+                <th class="border border-gray-300 px-4 py-2 text-left">Stack</th>
+                <th class="border border-gray-300 px-4 py-2 text-left">Purpose</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="border border-gray-300 px-4 py-2 font-mono">Call stack</td>
+                <td class="border border-gray-300 px-4 py-2">Tracks which functions are being called. When <code class="bg-stone-200 px-1 rounded">foo()</code> calls <code class="bg-stone-200 px-1 rounded">bar()</code>, a new frame for <code class="bg-stone-200 px-1 rounded">bar</code> is pushed on top.</td>
+              </tr>
+              <tr class="bg-orange-50">
+                <td class="border border-gray-300 px-4 py-2 font-mono">Evaluation stack</td>
+                <td class="border border-gray-300 px-4 py-2">Where intermediate values live. <code class="bg-stone-200 px-1 rounded">a + b</code> becomes: push <code class="bg-stone-200 px-1 rounded">a</code>, push <code class="bg-stone-200 px-1 rounded">b</code></td>
+              </tr>
+              <tr class="bg-orange-50">
+                <td class="border border-gray-300 px-4 py-2 font-mono">Block stack</td>
+                <td class="border border-gray-300 px-4 py-2">Tracks nested control structures (loops, <code class="bg-stone-200 px-1 rounded">try</code>/<code class="bg-stone-200 px-1 rounded">except</code>, <code class="bg-stone-200 px-1 rounded">with</code>). Tells the VM what to do on <code class="bg-stone-200 px-1 rounded">break</code> or <code class="bg-stone-200 px-1 rounded">continue</code>.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <p>Nice job getting through this boring part, now let's turn to how dynamo actually captures the graph.</p>
+        </div>
+
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          How Dynamo Captures the Graph
+        </h2>
+
+        <img src="artifacts/torch_compile/dynamo.png" class="mx-auto my-4" />
+
+        <p>
+            This diagram is the key idea behind Dynamo. Normally when you call a function, python creates a frame and hands it directly to the PVM for execution.
+            Dynamo hooks into this process and right before the PVM is able to execute the frame, it gets a chance to inspect it. The frame contains the function's bytecode, local variables, and evaluation stack.
+            So now instead of immediately letting python execute the bytecode, dynamo walks through each instructions and maintains a symbolic version of the evaluation stack and records tensor operations into an FX Graph.
+        </p>
+
+        <p>
+          Here's how I would visualize this - 
+        </p>
+
+        <ol class="list-decimal pl-6 space-y-2">
+          <li>Dynamo intercepts the frame of the function being called.</li>
+          <li>It steps through each bytecode instruction, simulating the evaluation stack with <strong>FX Proxy values</strong></li>
+          <li>When it encounters a tensor operation, it records a new FX node.</li>
+          <li>When it encounters something it can't capture, it creates a <strong>graph break</strong> basically it halts and lets the PVM run the unsupported op and then resumes tracing.</li>
+          <li>At the end, you have a complete FX Graph or multiple graphs depending on if you hit a graph break or not.</li>
+        </ol>
+
+        <p>
+            You can already see how this technique of using the bytecode might be able to handle more scenarios compared to simply trying to symbolic trace like fx tracer.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Guards
+        </h2>
+
+        <p>
+          Now after Dynamo captures the computation graph, it is usually handed off to the inductor where the lowering and optimization happens.
+        </p>
+
+        <p>Now that we have a graph captured, can I keep reusing this or at what point does this graph become useless and I have to retrace this?</p>
+
+        <p>
+           Guards are super handy dandy that help you do this. A guard is a function that checks whether the input properties of the compiled function have changed. If the guards pass, the cached compiled graph is reused. If they fail, the function is recompiled.
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>import torch
+
+@torch.compile(backend=my_reallycoolcompilerhehe)
+def foo(x, y):
+    return (x + y) * x
+
+foo(torch.randn(10), torch.ones(10)) # first compilation
+
+foo(torch.randn(10), torch.ones(10)) # same shapes, no dont recompile
+
+foo(torch.randn(20), torch.ones(20)) # shapes change, recompile
+
+foo(torch.randn(10, dtype=torch.float64), torch.ones(10, dtype=torch.float64)) # dtype change, recompile
+
+foo(torch.randn(10, device="cuda"), torch.ones(10, device="cuda")) # device change, recompile
+
+        </code></pre>
+
+        <p>
+            There is a limit to how many times a function can be recompiled. 
+            If either limit is exceeded, then we will not attempt to compile the function again and instead will run the function eagerly.
+        </p>
+
+        <p>
+          Usually a change in all the tensor properties like dtype, device, shape etc will always cause recompilation. 
+        </p>
+
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Graph Breaks
+        </h2>
+
+        <p>
+          When dynamo encounters an operator it cannot support, it creates a <strong>graph break</strong>  splitting the computation graph into several subgraphs that it <em>can</em> support, and returning control to the Python interpreter to execute the unsupported operator.
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>def foo(x):
+    x = torch.relu(x)     # captured
+    print("hello")        # graph break! can't capture print()
+    x = torch.neg(x)      # captured in a second subgraph
+    return x</code></pre>
+
+        <p>Here is what happens under the hood:</p>
+
+        <ol class="list-decimal pl-6 space-y-2">
+          <li>Dynamo traces through <code class="bg-stone-200 px-1 rounded">torch.relu(x)</code> → records FX node.</li>
+          <li>Encounters <code class="bg-stone-200 px-1 rounded">print("hello")</code> → cannot capture this in the graph.</li>
+          <li>Dynamo stops tracing, compiles subgraph 1 (relu), executes it, gets the real tensor result.</li>
+          <li>Hands control back to the PVM to run <code class="bg-stone-200 px-1 rounded">print("hello")</code> with real values.</li>
+          <li>Resumes tracing from the next instruction and captures subgraph 2 (neg).</li>
+        </ol>
+
+        <p>
+          Graph breaks are in general expensive but it also depends on where the graph break is occuring. 
+          Every break in the graph means dynamo must and hand control over to the interpreter and let it do its thing before it returns the control back. 
+          This to and fro is usually where the slowdown happens and you need to be very careful to minimize graph breaks.
+        </p>
+
+        <p>
+          Common causes of graph breaks - 
+        </p>
+
+        <ul class="list-disc pl-6 space-y-2">
+          <li>control flow dependent on tensor data (e.g., <code class="bg-stone-200 px-1 rounded">if x.sum() > 0</code>)</li>
+          <li>non-torch code</li>
+        </ul>
+      </section>
+
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Wrapping Up
+        </h2>
+
+        <p>
+          In the next post, we will look at <strong>AOT Autograd</strong>  how Dynamo's captured graph gets turned into a backward pass and lowered to the backend compiler.
+        </p>
+
+      </section>
+
+    </article>
+
+    <script>
+      lucide.createIcons();
+    </script>
+  </body>
+</html>
