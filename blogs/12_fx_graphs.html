@@ -302,16 +302,51 @@ output         output  output                 (relu,)      {}</code></pre>
         </h2>
 
         <p>
-          So how torch.fx actually turn python code into this graph?
+          So far we have seen that torch.fx magically turns python code into this graph, but how?
           It does this by a concept called <strong>symbolic tracing</strong>.
         </p>
 
         <h3 class="text-xl font-serif font-bold text-gray-950">Symbolic Tracing</h3>
 
-        <p> first talk about symbolic tracing, then proxies </p>
+        <p>First of, why do we need symbolic tracing?</p>
+        <p>When normal python code runs, it immediately executes the code and after the execution, you have the result but you dont know how you got there,
+          basically the computation graph.
+        </p>
+        <p>
+          Hence we turn to symbolic tracing. With symbolic tracing, torch.fx intercepts this call and says "hey, I saw a relu operation"
+          and creates a <code class="bg-stone-200 px-1 rounded">Node</code> instead. No actual computation happens. It only simulates it.
+        </p>
 
         <p>
-          Instead of feeding real tensors through your model, torch.fx feeds <strong>Proxy</strong> objects.
+          This interception is done by <strong>Proxy</strong> objects. A Proxy wraps each input value and
+          overrides every Python dunder method that could be used in a neural network forward pass:
+        </p>
+
+        <ul class="list-disc pl-6 space-y-2">
+          <li><code class="bg-stone-200 px-1 rounded">__add__</code>, <code class="bg-stone-200 px-1 rounded">__mul__</code>, <code class="bg-stone-200 px-1 rounded">__sub__</code> for arithmetic</li>
+          <li><code class="bg-stone-200 px-1 rounded">__getattr__</code> for attribute access like <code class="bg-stone-200 px-1 rounded">.shape</code>, <code class="bg-stone-200 px-1 rounded">.view()</code></li>
+          <li><code class="bg-stone-200 px-1 rounded">__getitem__</code> for indexing like <code class="bg-stone-200 px-1 rounded">x[0]</code></li>
+          <li><code class="bg-stone-200 px-1 rounded">__torch_function__</code> for torch ops like <code class="bg-stone-200 px-1 rounded">torch.relu(x)</code></li>
+          <li><code class="bg-stone-200 px-1 rounded">__call__</code> for submodule invocations like <code class="bg-stone-200 px-1 rounded">self.linear(x)</code></li>
+        </ul>
+
+        <p>
+          Every time one of these hooks fires, the Proxy creates a new Node and records the operation.
+          The Node stores the opcode, the target function, and the inputs (args/kwargs).
+          By the time forward returns, we have a complete graph.
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>import torch
+import torch.fx
+
+class MyModel(torch.nn.Module):
+    def forward(self, x):
+        z = x + 1           # Proxy.__add__ fires -&gt; creates Node(op=call_function, target=operator.add)
+        return torch.relu(z) # __torch_function__ fires -&gt; creates Node(op=call_function, target=torch.relu)
+</code></pre>
+
+        <p>
+          This is awesome! But this proxy approach has some limitations.
         </p>
 
         <h3 class="text-xl font-serif font-bold text-gray-950">Limitations of Symbolic Tracing</h3>
@@ -322,7 +357,7 @@ output         output  output                 (relu,)      {}</code></pre>
         </p>
 
         <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>def forward(self, x):
-    if x.sum() &gt; 0:     # Proxy can't evaluate this!
+    if x.sum() &gt; 0:     # proxy can't evaluate this!
         return torch.relu(x)
     else:
         return torch.neg(x)</code></pre>
@@ -341,14 +376,6 @@ def normalize(x):
     return x / sqrt(len(x))
 
 traced = torch.fx.symbolic_trace(normalize)  # fails!</code></pre>
-
-        <p>
-          You can fix this with <code class="bg-stone-200 px-1 rounded">torch.fx.wrap</code>:
-        </p>
-
-        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>torch.fx.wrap('len')
-torch.fx.wrap('sqrt')
-traced = torch.fx.symbolic_trace(normalize)  # works</code></pre>
 
         <p>
           <strong>3. Static control flow is fine</strong> - if the condition depends on module attributes
@@ -378,7 +405,7 @@ traced = torch.fx.symbolic_trace(normalize)  # works</code></pre>
         </h2>
 
         <p>
-          FX Graphs are the backbone of the entire PyTorch 2.0 compilation stack. Without understanding this you are going to get lost the moment 
+          Understanding FX Graphs are super important to understand the entire PyTorch 2.0 compilation stack. Without understanding this you are going to get lost the moment 
           you step into inductor or AOTAutograd.
         </p>
 
