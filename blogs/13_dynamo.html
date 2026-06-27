@@ -38,7 +38,7 @@
           In the last post, we saw how <strong>torch.fx</strong> turns python code into a graph using <strong>symbolic tracing</strong> with proxy objects.
         </p>
         <p>
-         TorchDynamo on the other hand, is a JIT compiler that operates at the Python bytecode level, captures a computation graph and hands it to a backend for further optimization.
+         TorchDynamo on the other hand, is a JIT compiler that operates at the python bytecode level, captures a computation graph and hands it to a backend for further optimization.
         </p>
         <p>
           In this post we will pay attention to how dynamo works and how its different from symbolic tracing.
@@ -50,21 +50,21 @@
           What Makes Dynamo Different
         </h2>
         <p>
-          Dynamo is a tracer that given a function and its inputs, executes the function and records a <em>linear sequence of instructions</em> (without control flow) into a graph. Unlike FX's symbolic tracing which uses Proxy objects, Dynamo works by <strong>simulating the Python virtual machine</strong> at the bytecode level.
+          Dynamo is a tracer that given a function and its inputs, executes the function and records a <em>linear sequence of instructions</em> (without control flow) into a graph. Unlike FX's symbolic tracing which uses Proxy objects, Dynamo works by <strong>simulating the python virtual machine</strong> at the bytecode level.
         </p>
 
       </section>
 
       <section class="space-y-4">
         <h2 class="text-2xl font-serif font-bold text-gray-950">
-          Python Bytecode
+          python Bytecode
         </h2>
 
         <p>
-          Before we can understand Dynamo, we need to understand how Python actually runs code. Python compiles functions into <strong>bytecode</strong> which is a sequence of low-level instructions for the Python virtual machine (PVM).
+          Before we can understand Dynamo, we need to understand how python actually runs code. python compiles functions into <strong>bytecode</strong> which is a sequence of low-level instructions for the python virtual machine (PVM).
         </p>
 
-        <p>When a function is called, Python creates a <strong>frame</strong> that stores - </p>
+        <p>When a function is called, python creates a <strong>frame</strong> that stores - </p>
 
         <ul class="list-disc pl-6 space-y-2">
           <li>the bytecode instructions</li>
@@ -100,8 +100,8 @@
             </tbody>
           </table>
 
-          <p>Nice job getting through this boring part, now let's turn to how dynamo actually captures the graph.</p>
         </div>
+        <p>With that out of the way, let's see how dynamo actually captures the graph.</p>
 
       </section>
 
@@ -185,7 +185,7 @@ foo(torch.randn(10, device="cuda"), torch.ones(10, device="cuda")) # device chan
         </h2>
 
         <p>
-          When dynamo encounters an operator it cannot support, it creates a <strong>graph break</strong>  splitting the computation graph into several subgraphs that it <em>can</em> support, and returning control to the Python interpreter to execute the unsupported operator.
+          When dynamo encounters an operator it cannot support, it creates a <strong>graph break</strong>  splitting the computation graph into several subgraphs that it <em>can</em> support, and returning control to the python interpreter to execute the unsupported operator.
         </p>
 
         <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>def foo(x):
@@ -197,17 +197,17 @@ foo(torch.randn(10, device="cuda"), torch.ones(10, device="cuda")) # device chan
         <p>Here is what happens under the hood:</p>
 
         <ol class="list-decimal pl-6 space-y-2">
-          <li>Dynamo traces through <code class="bg-stone-200 px-1 rounded">torch.relu(x)</code> → records FX node.</li>
-          <li>Encounters <code class="bg-stone-200 px-1 rounded">print("hello")</code> → cannot capture this in the graph.</li>
+          <li>Dynamo traces through <code class="bg-stone-200 px-1 rounded">torch.relu(x)</code>  records FX node.</li>
+          <li>Encounters <code class="bg-stone-200 px-1 rounded">print("hello")</code>  cannot capture this in the graph.</li>
           <li>Dynamo stops tracing, compiles subgraph 1 (relu), executes it, gets the real tensor result.</li>
           <li>Hands control back to the PVM to run <code class="bg-stone-200 px-1 rounded">print("hello")</code> with real values.</li>
           <li>Resumes tracing from the next instruction and captures subgraph 2 (neg).</li>
         </ol>
 
         <p>
-          Graph breaks are in general expensive but it also depends on where the graph break is occuring. 
-          Every break in the graph means dynamo must and hand control over to the interpreter and let it do its thing before it returns the control back. 
-          This to and fro is usually where the slowdown happens and you need to be very careful to minimize graph breaks.
+          Graph breaks are in general expensive but it also depends on where the graph break is occurring. 
+          Every break in the graph means dynamo must halt and hand control over to the interpreter and let it do its thing before it returns the control back. 
+          This to-and-fro is usually where the slowdown happens and you need to be very careful to minimize graph breaks.
         </p>
 
         <p>
@@ -215,8 +215,8 @@ foo(torch.randn(10, device="cuda"), torch.ones(10, device="cuda")) # device chan
         </p>
 
         <ul class="list-disc pl-6 space-y-2">
-          <li>control flow dependent on tensor data (e.g., <code class="bg-stone-200 px-1 rounded">if x.sum() > 0</code>)</li>
-          <li>non-torch code</li>
+          <li>Control flow dependent on tensor data (e.g., <code class="bg-stone-200 px-1 rounded">if x.sum() > 0</code>)</li>
+          <li>python operations that cannot be represented in an FX Graph (e.g., <code class="bg-stone-200 px-1 rounded">print()</code>, file I/O, sockets, etc.)</li>
         </ul>
       </section>
 
@@ -227,7 +227,7 @@ foo(torch.randn(10, device="cuda"), torch.ones(10, device="cuda")) # device chan
         </h2>
 
         <p>
-          In the next post, we will look at <strong>AOT Autograd</strong>  how Dynamo's captured graph gets turned into a backward pass and lowered to the backend compiler.
+          In the next post, we will look at <strong>AOT Autograd</strong> and how Dynamo's captured graph gets turned into a backward pass and lowered to the backend compiler.
         </p>
 
       </section>
