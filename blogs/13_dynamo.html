@@ -57,7 +57,7 @@
 
       <section class="space-y-4">
         <h2 class="text-2xl font-serif font-bold text-gray-950">
-          python Bytecode
+          python bytecode
         </h2>
 
         <p>
@@ -124,7 +124,7 @@
 
         <ol class="list-decimal pl-6 space-y-2">
           <li>Dynamo intercepts the frame of the function being called.</li>
-          <li>It steps through each bytecode instruction, simulating the evaluation stack with <strong>FX Proxy values</strong></li>
+          <li>It walks through the function's bytecode instruction by instruction</li>
           <li>When it encounters a tensor operation, it records a new FX node.</li>
           <li>When it encounters something it can't capture, it creates a <strong>graph break</strong> basically it halts and lets the PVM run the unsupported op and then resumes tracing.</li>
           <li>At the end, you have a complete FX Graph or multiple graphs depending on if you hit a graph break or not.</li>
