@@ -87,15 +87,15 @@
             <tbody>
               <tr>
                 <td class="border border-gray-300 px-4 py-2 font-mono">Call stack</td>
-                <td class="border border-gray-300 px-4 py-2">Tracks which functions are being called. When <code class="bg-stone-200 px-1 rounded">foo()</code> calls <code class="bg-stone-200 px-1 rounded">bar()</code>, a new frame for <code class="bg-stone-200 px-1 rounded">bar</code> is pushed on top.</td>
+                <td class="border border-gray-300 px-4 py-2">Tracks active function calls. When <code class="bg-stone-200 px-1 rounded">foo()</code> calls <code class="bg-stone-200 px-1 rounded">bar()</code>, a new frame for <code class="bg-stone-200 px-1 rounded">bar</code> is pushed on top.</td>
               </tr>
               <tr class="bg-orange-50">
                 <td class="border border-gray-300 px-4 py-2 font-mono">Evaluation stack</td>
-                <td class="border border-gray-300 px-4 py-2">Where intermediate values live. <code class="bg-stone-200 px-1 rounded">a + b</code> becomes: push <code class="bg-stone-200 px-1 rounded">a</code>, push <code class="bg-stone-200 px-1 rounded">b</code></td>
+                <td class="border border-gray-300 px-4 py-2">Stores temporary values while executing bytecode instructions. <code class="bg-stone-200 px-1 rounded">a + b</code> becomes: push <code class="bg-stone-200 px-1 rounded">a</code>, push <code class="bg-stone-200 px-1 rounded">b</code> then pops both values, computes the result, and pushes the result back onto the stack.</td>
               </tr>
               <tr class="bg-orange-50">
                 <td class="border border-gray-300 px-4 py-2 font-mono">Block stack</td>
-                <td class="border border-gray-300 px-4 py-2">Tracks nested control structures (loops, <code class="bg-stone-200 px-1 rounded">try</code>/<code class="bg-stone-200 px-1 rounded">except</code>, <code class="bg-stone-200 px-1 rounded">with</code>). Tells the VM what to do on <code class="bg-stone-200 px-1 rounded">break</code> or <code class="bg-stone-200 px-1 rounded">continue</code>.</td>
+                <td class="border border-gray-300 px-4 py-2">Tracks active control-flow blocks such as loops, <code class="bg-stone-200 px-1 rounded">try</code>/<code class="bg-stone-200 px-1 rounded">except</code>, <code class="bg-stone-200 px-1 rounded">finally</code>, and <code class="bg-stone-200 px-1 rounded">with</code> statements. It tells the VM where to jump when control flow changes (e.g., <code class="bg-stone-200 px-1 rounded">break</code>, <code class="bg-stone-200 px-1 rounded">continue</code>, exceptions, or exiting a <code class="bg-stone-200 px-1 rounded">with</code> block).</td>
               </tr>
             </tbody>
           </table>
