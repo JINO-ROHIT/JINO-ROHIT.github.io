@@ -351,7 +351,7 @@ class MyModel(torch.nn.Module):
         <h3 class="text-xl font-serif font-bold text-gray-950">Limitations of Symbolic Tracing</h3>
 
         <p>
-          <strong>1. Dynamic control flow</strong> - if the condition depends on tensor data, it can't be traced
+          <strong>1. Dynamic control flow</strong> - if the condition depends on program execution paths that change at runtime based on variables, data, or user input, it can't be traced
           because Proxies don't have real values to evaluate the condition:
         </p>
 
@@ -377,8 +377,7 @@ def normalize(x):
 traced = torch.fx.symbolic_trace(normalize)  # fails!</code></pre>
 
         <p>
-          <strong>3. Static control flow is fine</strong> - if the condition depends on module attributes
-          (not tensor data), tracing works perfectly:
+          <strong>3. Static control flow is fine</strong> - if the condition is known during initialization, tracing works perfectly:
         </p>
 
         <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>class MyModule(torch.nn.Module):
