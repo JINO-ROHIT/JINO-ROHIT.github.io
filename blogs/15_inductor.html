@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TorchInductor</title>
+
+    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body);"></script>
+
+  </head>
+
+  <body class="bg-orange-50 text-gray-900 w-full max-w-3xl mx-auto px-5 md:px-0 pb-20">
+    <nav class="flex justify-between items-center py-6 border-b border-gray-300">
+      <h1 class="font-serif text-3xl font-bold">Jino Rohit</h1>
+      <div class="flex gap-6 text-sm">
+        <a href="../index.html" class="hover:text-orange-600 transition">Home</a>
+        <a href="./blog.html" class="hover:text-orange-600 transition">Blogs</a>
+        <a href="../projects/projects.html" class="hover:text-orange-600 transition">Projects</a>
+      </div>
+    </nav>
+
+    <header class="mt-12">
+      <h1 class="font-serif text-4xl font-bold leading-tight text-gray-950">
+        Torch Internals (Part 4) - TorchInductor
+      </h1>
+      <p class="text-sm text-gray-600 mt-4 italic">July 04, 2026 • 10 min read</p>
+    </header>
+
+    <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
+
+      <section class="space-y-4">
+        <p>
+          In the last 3 blog posts, we have understood fx graphs, how TorchDynamo captures an FX graph and how AOTAutograd splits it into forward/backward graphs. The final piece of the compile stack is <strong>TorchInductor</strong> which is the compiler that takes those FX graphs and turns them into efficient Triton kernels.
+        </p>
+        <p>
+          Inductor works in three phases. First, it lowers the FX graph into its own IR (a recipe for computing each element). Then it schedules and fuses those IR nodes. Finally, it walks through the IR and generates Triton code.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Let's understand the IR
+        </h2>
+
+        <p>
+          The first thing inductor does is to lower the FX graph produced by TorchDynamo into its own IR. So it's very important to try and understand what it looks like.
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>@torch.compile
+def f(x):
+    b = torch.floor(x) + torch.ceil(x)
+    c = b.sum(dim=-1)
+    d = c + 1
+    return d</code></pre>
+
+        <p>
+          For the above function, let's see how each line gets lowered into an IR.
+        </p>
+
+        <h3 class="text-xl font-serif font-bold text-gray-950">1. Placeholders/Inputs</h3>
+
+        <p>The input <code class="bg-stone-200 px-1 rounded">x</code> is converted into an IR that looks like this - </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>TensorBox(
+    StorageBox(
+        InputBuffer(
+            name="arg0",
+            layout=FixedLayout(
+                device="cuda:0",
+                dtype=torch.float32,
+                size=[32, 512, 1024],
+                stride=[524288, 1024, 1]
+            )
+        )
+    )
+)</code></pre>
+
+        <p>
+          <code class="bg-stone-200 px-1 rounded">InputBuffer</code> stores metadata about the input tensor like device, dtype, shape etc but no computation happens here. Think of it as a reference to data that already exists in memory.
+        </p>
+
+        <h3 class="text-xl font-serif font-bold text-gray-950">2. Pointwise Operations</h3>
+
+        <p><code class="bg-stone-200 px-1 rounded">torch.floor(x)</code> becomes:</p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>TensorBox(
+    StorageBox(
+        Pointwise(
+            device='cuda:0',
+            dtype=torch.float32,
+
+            def inner_fn(index):
+                i0, i1, i2 = index
+                tmp0 = ops.load(arg0_1, i2 + 1024*i1 + 524288*i0)
+                tmp1 = ops.floor(tmp0)
+                return tmp1
+
+            ranges=[32, 512, 1024]
+        )
+    )
+)</code></pre>
+
+        <p>
+          For pointwise operations, inductor stores a <strong>recipe</strong> for computing one output element but it never actually computes it. The function that holds this recipe is called the <code class="bg-stone-200 px-1 rounded">inner_fn</code>.
+        </p>
+
+        <p>You can read the function and see the logic to load the element across the stride and compute floor.</p>
+
+        <h3 class="text-xl font-serif font-bold text-gray-950">3. Pointwise Fusion</h3>
+
+        <p>Cool, that was for pointwise operations. What about pointwise fusion? For example <code class="bg-stone-200 px-1 rounded">floor(x) + ceil(x)</code></p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>TensorBox(
+    StorageBox(
+        Pointwise(
+            def inner_fn(index):
+                i0, i1, i2 = index
+
+                tmp0 = ops.load(arg0_1, i2 + 1024*i1 + 524288*i0)
+                tmp1 = ops.floor(tmp0)
+
+                tmp2 = ops.load(arg0_1, i2 + 1024*i1 + 524288*i0)
+                tmp3 = ops.ceil(tmp2)
+
+                tmp4 = tmp1 + tmp3
+                return tmp4
+        )
+    )
+)</code></pre>
+
+        <p>
+          Ah, instead of having individual inner_fn, both of them got rolled into a single function.
+        </p>
+
+        <h3 class="text-xl font-serif font-bold text-gray-950">4. Reduction Operations</h3>
+
+        <p>Reduction operations are expressed in a different way since unlike pointwise operators, they depends on many other elements.</p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>TensorBox(
+    StorageBox(
+        ComputedBuffer(
+            name="buf0",
+            data=Reduction(
+                ranges=[32, 512],
+                reduction_ranges=[1024],
+
+                def inner_fn(index, rindex):
+                    i0, i1 = index
+                    r0 = rindex
+
+                    tmp0 = ops.load(arg0_1, r0 + 1024*i1 + 524288*i0)
+                    tmp1 = ops.floor(tmp0)
+
+                    tmp2 = ops.load(arg0_1, r0 + 1024*i1 + 524288*i0)
+                    tmp3 = ops.ceil(tmp2)
+
+                    tmp4 = tmp1 + tmp3
+                    return tmp4
+            )
+        )
+    )
+)</code></pre>
+
+        <p>Conceptually this is:</p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>for i0 in range(32):
+    for i1 in range(512):
+        total = 0
+        for r0 in range(1024):
+            total += floor(x[i0,i1,r0]) + ceil(x[i0,i1,r0])
+        output[i0,i1] = total</code></pre>
+
+        <p>
+          Remember we are trying to express this line <code class="bg-stone-200 px-1 rounded">c = b.sum(dim=-1)</code>, so we have the floor, ceil, and add computations appear again inside the reduction. This is not recomputation rather those recipes are simply copied into this reduction recipe.
+        </p>
+
+        <p>
+          Also notice, the reduction result is wrapped in a <code class="bg-stone-200 px-1 rounded">ComputedBuffer(name="buf0")</code>. This means the result is now a logical tensor that future operations can read. It does <strong>not</strong> mean memory has been allocated and whether it lives in registers, shared memory, or global memory is decided later by the scheduler.
+        </p>
+
+        <h3 class="text-xl font-serif font-bold text-gray-950">The last pointwise operation</h3>
+
+        <p>The last line in the function <code class="bg-stone-200 px-1 rounded">c + 1</code> becomes - </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>TensorBox(
+    StorageBox(
+        Pointwise(
+            def inner_fn(index):
+                i0, i1 = index
+                tmp0 = ops.load(buf0, i1 + 512*i0)
+                tmp1 = ops.constant(1, torch.float32)
+                tmp2 = tmp0 + tmp1
+                return tmp2
+        )
+    )
+)</code></pre>
+
+        <p>
+          Unlike the earlier pointwise nodes, this one loads from <code class="bg-stone-200 px-1 rounded">buf0</code> (the reduction result) instead of the input tensor.
+        </p>
+
+
+        <p>
+          The output node wraps the final computation inside another <code class="bg-stone-200 px-1 rounded">ComputedBuffer(name="buf1")</code> and it is the final tensor returned by the compiled function.
+        </p>
+
+
+      </section>
+
+      <!-- <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          How Lowering Happens
+        </h2>
+
+        <p>Great! We have now seen some of the common IRs for some important operations. Let's now look at how lowering actually happens.</p>
+
+        <p>
+          Every ATen op has a lowering function registered via <code class="bg-stone-200 px-1 rounded">@register_lowering</code>. Here's what it looks like for<code class="bg-stone-200 px-1 rounded">ceil</code>:
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>@register_lowering(aten.ceil)
+def ceil(x):
+    if is_integer_type(x):
+        return clone(x)
+    fn = ops_wrapper("ceil")
+    return make_pointwise(fn)(x)</code></pre>
+
+        <p>
+          <code class="bg-stone-200 px-1 rounded">x</code> here is an Inductor IR node (could be <code class="bg-stone-200 px-1 rounded">InputBuffer</code>, <code class="bg-stone-200 px-1 rounded">ComputedBuffer</code>, or even an unmaterialized <code class="bg-stone-200 px-1 rounded">Pointwise</code>).
+        </p>
+
+        <p>
+          The <code class="bg-stone-200 px-1 rounded">make_pointwise</code> is a helper that builds pointwise IR nodes. Here's a simplified version:
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>def make_pointwise(fn, ...):
+    def inner(*inputs, alpha=None):
+        loaders = [x.make_loader() for x in inputs]
+        ranges = inputs[0].get_size()
+
+        def inner_fn(index):
+            return fn(*[load(index) for load in loaders])
+
+        return Pointwise.create(
+            device=device, dtype=dtype,
+            inner_fn=inner_fn,
+            ranges=ranges,
+        )
+    return inner</code></pre>
+
+        <p>
+          There are three layers of nesting here:
+        </p>
+
+        <ol class="list-decimal pl-6 space-y-2">
+          <li><code class="bg-stone-200 px-1 rounded">make_pointwise(fn)</code> — configures the math function.</li>
+          <li><code class="bg-stone-200 px-1 rounded">inner(*inputs)</code> — receives Inductor IR nodes, builds <code class="bg-stone-200 px-1 rounded">inner_fn</code> but <strong>does not call it</strong>.</li>
+          <li><code class="bg-stone-200 px-1 rounded">inner_fn(index)</code> — the per-element recipe, called later during codegen.</li>
+        </ol>
+
+        <p>
+          To see the difference, trace what happens for <code class="bg-stone-200 px-1 rounded">ceil(x)</code>:
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code># Step 1: ceil(x) is called during lowering
+#         x is an InputBuffer IR node (shape [32,512,1024])
+
+# Step 2: ceil calls make_pointwise(ops_wrapper("ceil"))(x)
+#         └── make_pointwise(fn) returns inner (the closure)
+#         └── inner(x) is called now
+
+# Step 3: inside inner(x):
+#         loaders = [x.make_loader()]        # InputBuffer.make_loader()
+#         ranges = [32, 512, 1024]
+#         def inner_fn(index):
+#             return ops.ceil(loaders[0](index))
+#         return Pointwise.create(           # returns IR node, not a value
+#             inner_fn=inner_fn,             # stored as a recipe
+#             ranges=[32,512,1024]
+#         )
+
+# Step 4: result is a Pointwise IR node (the recipe). No computation happened.</code></pre>
+
+        <p>
+          <code class="bg-stone-200 px-1 rounded">inner</code> builds the IR graph. <code class="bg-stone-200 px-1 rounded">inner_fn</code> is inspected by codegen to emit the actual kernel code. Neither of them actually runs <code class="bg-stone-200 px-1 rounded">ceil</code> on data — that happens when the compiled Triton kernel executes on the GPU.
+        </p>
+
+        <h3 class="text-xl font-serif font-bold text-gray-950">How Loaders Work</h3>
+
+        <p>
+          Each IR type has its own <code class="bg-stone-200 px-1 rounded">make_loader()</code>. This is the key to understanding fusion:
+        </p>
+
+        <ul class="list-disc pl-6 space-y-2">
+          <li><strong><code class="bg-stone-200 px-1 rounded">InputBuffer.make_loader()</code></strong> — returns a function that calls <code class="bg-stone-200 px-1 rounded">ops.load(buf, offset)</code>. This reads data directly from the input tensor.</li>
+          <li><strong><code class="bg-stone-200 px-1 rounded">Pointwise.make_loader()</code></strong> — returns its own <code class="bg-stone-200 px-1 rounded">inner_fn</code>! When you call <code class="bg-stone-200 px-1 rounded">load(index)</code> on a pointwise node, you get back its computation recipe.</li>
+        </ul>
+
+        <p>
+          This is how fusion happens. When <code class="bg-stone-200 px-1 rounded">add(floor, ceil)</code> is lowered:
+        </p>
+
+        <ol class="list-decimal pl-6 space-y-2">
+          <li><code class="bg-stone-200 px-1 rounded">make_pointwise(add_fn)(floor_ir, ceil_ir)</code> is called.</li>
+          <li><code class="bg-stone-200 px-1 rounded">floor_ir.make_loader()</code> returns floor's <code class="bg-stone-200 px-1 rounded">inner_fn</code> (load → floor).</li>
+          <li><code class="bg-stone-200 px-1 rounded">ceil_ir.make_loader()</code> returns ceil's <code class="bg-stone-200 px-1 rounded">inner_fn</code> (load → ceil).</li>
+          <li>The new <code class="bg-stone-200 px-1 rounded">inner_fn</code> calls both loaders and adds them — fusing the three ops into one.</li>
+        </ol>
+
+      </section> -->
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          How Lowering Happens
+        </h2>
+
+        <p>Great! We have now seen some of the common IRs for some important operations. Let's now look at how lowering actually happens.</p>
+
+        <p>
+          We've seen that <code class="bg-stone-200 px-1 rounded">inner_fn</code> is a Python function full of <code class="bg-stone-200 px-1 rounded">ops.load</code>, <code class="bg-stone-200 px-1 rounded">ops.floor</code>, etc. But these aren't really pytorch ops, rather they're abstract ops that gets replaced depending on what handler is installed during codegen.
+        </p>
+
+        <p>
+          <code class="bg-stone-200 px-1 rounded">ops.*</code> like <code class="bg-stone-200 px-1 rounded">ops.floor</code>, <code class="bg-stone-200 px-1 rounded">ops.load</code>, <code class="bg-stone-200 px-1 rounded">ops.add</code> are defined on a class called <code class="bg-stone-200 px-1 rounded">OpOverrides</code>. Take a look at this - 
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>class TritonOverrides(OpOverrides):
+    @staticmethod
+    def floor(x):
+        return f"tl.math.floor({x})"
+
+    @staticmethod
+    def ceil(x):
+        return f"tl.math.ceil({x})"
+
+    @staticmethod
+    def add(x, y):
+        return f"({x} + {y})"
+
+    @staticmethod
+    def load(name, index):
+        return f"tl.load({name} + ({index}), None)"</code></pre>
+
+        <p>So basically what happens is when the inner_fn is executed during codegen, they return these hardcoded code strings but they don't compute anything.</p>
+        
+        <p>Here's an example.</p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>
+def inner_fn(index):
+    tmp0 = ops.load("in_ptr0", "x0")       # "tl.load(in_ptr0 + (x0), None)"
+    tmp1 = ops.floor(tmp0)                 # "tl.math.floor(tl.load(...))"
+    tmp2 = ops.ceil(tmp0)                  # "tl.math.ceil(tl.load(...))"
+    tmp3 = ops.add(tmp1, tmp2)             # "(tl.math.floor(...) + tl.math.ceil(...))"
+    return tmp3</code></pre>
+
+        <p>
+          Cool, but where did these intermediate <code class="bg-stone-200 px-1 rounded">tmp0</code>, <code class="bg-stone-200 px-1 rounded">tmp1</code> etc come from?
+        </p>
+
+        <h3 class="text-xl font-serif font-bold text-gray-950">Common Subexpression Elimination</h3>
+
+        <p>
+          If you remember in the IR, inner_fn loads the same input twice (once for floor, once for ceil). But in the generated Triton code, it loads this only once.
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>tmp0 = tl.load(in_ptr0 + (x0), None)
+tmp1 = tl.math.floor(tmp0)
+tmp2 = tl.math.ceil(tmp0)          # reuses tmp0, no second load</code></pre>
+
+        <p>
+          This happens because Inductor's <code class="bg-stone-200 px-1 rounded">CSE</code> class deduplicates identical expressions:
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>class CSE:
+    def generate(self, buffer, expr):
+        var = self.cache.get(expr)
+        if not var:
+            var = self.newvar()
+            self.cache[expr] = var
+            buffer.writeline(f"{var} = {expr}")
+        return var</code></pre>
+
+        <p>
+          The two loads have the same address expression, so the second one returns the same <code class="bg-stone-200 px-1 rounded">tmp0</code> variable.
+        </p>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">
+          Wrapping Up
+        </h2>
+
+        <p>
+          This wraps up the torch.compile internals series. We covered the entire stack starting from FX graphs, Dynamo, AOTAutograd, and finally Inductor. Hopefully, you now have a better intuition to how things work and the codebase is a lot less intimidating to read.
+        </p>
+
+      </section>
+
+    </article>
+
+    <script>
+      lucide.createIcons();
+    </script>
+  </body>
+</html>
