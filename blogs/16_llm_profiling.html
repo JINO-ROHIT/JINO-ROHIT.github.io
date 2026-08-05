@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Profiling LLM Inference with SGLang and Torch Profiler</title>
+
+    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body);"></script>
+
+    <script
+      async
+      src="https://www.googletagmanager.com/gtag/js?id=G-4VP1VKLPKJ"
+    ></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag() {
+        dataLayer.push(arguments);
+      }
+      gtag("js", new Date());
+      gtag("config", "G-4VP1VKLPKJ");
+    </script>
+
+    <style>
+      figcaption {
+        text-align: center;
+        font-size: 0.85rem;
+        color: #6b7280;
+        margin-top: 0.5rem;
+        font-style: italic;
+      }
+    </style>
+  </head>
+
+  <body class="bg-orange-50 text-gray-900 w-full max-w-3xl mx-auto px-5 md:px-0 pb-20">
+    <nav class="flex justify-between items-center py-6 border-b border-gray-300">
+      <h1 class="font-serif text-3xl font-bold">Jino Rohit</h1>
+      <div class="flex gap-6 text-sm">
+        <a href="../index.html" class="hover:text-orange-600 transition">Home</a>
+        <a href="./blog.html" class="hover:text-orange-600 transition">Blogs</a>
+        <a href="../projects/projects.html" class="hover:text-orange-600 transition">Projects</a>
+      </div>
+    </nav>
+
+    <header class="mt-12">
+      <h1 class="font-serif text-4xl font-bold leading-tight text-gray-950">
+        Profiling LLM Inference with SGLang and Torch Profiler
+      </h1>
+      <p class="text-sm text-gray-600 mt-4 italic">August 05, 2026 • 15 min read</p>
+    </header>
+
+    <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
+      <section class="space-y-4">
+        <p>
+          This blog is my attempt to learn how to profile an llm served using sglang and its in built torch profiler integration that comes out of box. The idea here would be try and understand when I hit sglang serve on my command prompt, can I recognize the CPU side and GPU side events and understand the question "where is most of my time and compute going?"  
+        </p>
+
+        <p>
+            For this first of many blogs, im using <strong>Qwen3.5-0.8B</strong> on a single NVIDIA L4 GPU, so a lot of people with lesser compute can also profile and follow along. Besides being a small model, it also has a lot of the newer architecture designs and makes the trace still readable. 
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Understanding the Model First</h2>
+
+        <p>
+          Before opening the profiler, it helps to know what patterns/layers we expect to see. Make sure you understand the model very well. For this run, the important model stats are -
+        </p>
+
+        <ul class="list-disc pl-6 space-y-2">
+          <li>parameters - 0.8B</li>
+          <li>hidden size - 1024</li>
+          <li>embedding size - 248k</li>
+          <li>layers -24</li>
+          <li>a pattern of 6 groups of <code class="bg-stone-200 px-1 rounded">3 x (Gated DeltaNet + FFN)</code> followed by <code class="bg-stone-200 px-1 rounded">1 x (Gated Attention + FFN)</code></li>
+          <li>context length: 262k tokens</li>
+        </ul>
+
+        <p>
+          this means using bf16, the weights take about -
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>0.8B parameters * 2 bytes = 1.6 GB</code></pre>
+
+        <p>
+          For batch size 1 decode, we can do a basic math roofline check to understand what kind of bottleneck to expect.
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>L4 memory bandwidth = 300 GB/s
+weight bytes/token = 1.6 GB
+
+bandwidth limited throughput = 300 / 1.6
+                             = 187.5 tokens/s</code></pre>
+
+        <p>
+          For compute, a very rough inference estimate is around <code class="bg-stone-200 px-1 rounded">2P</code> FLOPs per token. For this model -
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>FLOPs/token = 2 * 0.8B = 1.6 GFLOPs
+L4 dense bf16 tensor throughput ~ 121 TFLOP/s
+
+compute-limited throughput = 121000 / 1.6
+                           = 75k tokens/s</code></pre>
+
+        <p>
+          The compute roof is way higher than the bandwidth roof. So before looking at any trace, my starting assumption is that for batch size 1 decode, this workload is going to be much closer to memory bound than compute bound. The profiler should either confirm that or explain why that mental model is wrong.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Setup</h2>
+
+        <!-- <p>
+          I installed SGLang in a fresh environment and launched the server with the Qwen model:
+        </p> -->
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>apt-get update
+apt-get install -y cuda-toolkit-13-2
+
+uv venv
+source .venv/bin/activate
+uv pip install --prerelease=allow sglang
+
+sglang serve --model-path Qwen/Qwen3.5-0.8B</code></pre>
+
+        <p>
+          Now we make use of the profiling endpoint to record CPU and GPU activities and seperate the prefill and decode into two traces so its easier to read.
+        </p>
+
+        <p> Here I say wait for 5 steps (warmup), then profile the next 2 steps. The profiler captures two forward passes during decode.</p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>curl -X POST http://127.0.0.1:30000/start_profile \
+  -H "Content-Type: application/json" \
+  -d '{
+    "output_dir": "/workspace/traces",
+    "start_step": 5,
+    "num_steps": 2,
+    "activities": ["CPU", "GPU"],
+    "profile_by_stage": true,
+    "record_shapes": true,
+    "with_stack": true
+  }'</code></pre>
+
+        <p>
+          Then I sent a single request with the serving benchmark - 
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>python -m sglang.bench_serving --backend sglang --num-prompts 1</code></pre>
+
+        <p>
+          By the way, CUDA launches are asynchronous. This means the CPU timeline can show a kernel launch earlier, while the actual kernel runs later on the GPU lane and this intially tripped me up a lot. So when reading the trace, I mostly stuck to reading the CPU side first to understand who launched the work, and the GPU side to understand where the device time went.
+        </p>
+      </section>
+
+      <p> To view the traces, go to https://ui.perfetto.dev/ and load the traces generated after the profiling is done.</p>
+      
+    </article>
+
+    <script>
+      lucide.createIcons();
+    </script>
+  </body>
+</html>
