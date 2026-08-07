@@ -90,8 +90,8 @@
           For batch size 1 decode, we can do a basic math roofline check to understand what kind of bottleneck to expect.
         </p>
 
-        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>L4 memory bandwidth = 300 GB/s
-weight bytes/token = 1.6 GB
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>memory bandwidth for my gpu = 300 GB/s
+weights to move per token = 1.6 GB
 
 bandwidth limited throughput = 300 / 1.6
                              = 187.5 tokens/s</code></pre>
@@ -101,7 +101,7 @@ bandwidth limited throughput = 300 / 1.6
         </p>
 
         <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>FLOPs/token = 2 * 0.8B = 1.6 GFLOPs
-L4 dense bf16 tensor throughput ~ 121 TFLOP/s
+bf16 tensor throughput ~ 121 TFLOP/s
 
 compute-limited throughput = 121000 / 1.6
                            = 75k tokens/s</code></pre>
@@ -158,6 +158,318 @@ sglang serve --model-path Qwen/Qwen3.5-0.8B</code></pre>
 
       <p> To view the traces, go to https://ui.perfetto.dev/ and load the traces generated after the profiling is done.</p>
       
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Prefill Section</h2>
+
+        <figure>
+          <img src="artifacts/llm_profiling/prefill_zoomedout_annote.png" class="mx-auto my-4 rounded border border-gray-300" />
+          <figcaption>Prefill section for a single request.</figcaption>
+        </figure>
+
+        <p>
+          This is the full prefill region for our single request. Prefill is the phase where the model consumes the prompt tokens and produces a single token. The top half of the profiler has the CPU side operations and lower half is the GPU side operations.
+        </p>
+
+        <p>Are you able to spot your first pattern? The peaks seem to be grouped into 3 with a smaller peak in between. Another striking thing is the first peak
+            being way bigger compared to the others. Keep this in mind and we will unravel each feature as we progress in the blog.
+        </p>
+
+        <p>
+            Cool, if you scroll into the tinier peak to the left most side and zoom in a bit, you will see a lot of setup work. This includes starting the torch profiler,
+            sglang getting ready to prepare the batch of inputs, setting up CUDA streams everything lining up to run the forward pass.
+        </p>
+
+        <figure>
+          <img src="artifacts/llm_profiling/prefill_start_profile.png" class="mx-auto my-4 rounded border border-gray-300" />
+          <figcaption>The scheduler prepares the request, starts profiling, sets streams, and builds the batch.</figcaption>
+        </figure>
+
+        <p>Another cool thing you can do is if you want to know the kernel a particular cpu activity launched, you can click on the operation and it will link
+            you to the exact kernel it launched with some information.
+
+        </p>
+        <figure>
+          <img src="artifacts/llm_profiling/prefill_async_copy.png" class="mx-auto my-4 rounded border border-gray-300" />
+          <figcaption>A small async copy linked back to the CPU-side launch.</figcaption>
+        </figure>
+
+        <figure>
+          <img src="artifacts/llm_profiling/prefill_htod.png" class="mx-auto my-4 rounded border border-gray-300" />
+          <figcaption>The host-to-device copy is tiny, probably token ids or request metadata.</figcaption>
+        </figure>
+
+        <p>
+          In this case,  we can see a host-to-device copy from pinned CPU memory to the GPU. For this run it is probably request metadata, token ids, or some small tensor needed by the scheduler.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Pattern 1 - The Repeating Peaks</h2>
+
+        <figure>
+          <img src="artifacts/llm_profiling/annotated_peaks.png" class="mx-auto my-4 rounded border border-gray-300" />
+          <figcaption>The main prefill compute region. The peaks appear in repeating groups.</figcaption>
+        </figure>
+
+        <p>
+          Now we are inside the main prefill compute region. Remember from the zoomed out view we had these repeating peaks but they appear in groups. Well, these peaks are not random and if you remember the model architecture, these peaks matches exactly the group structure we had.
+        </p>
+
+        <p>
+          To jog your memory a bit, Qwen3.5-0.8B has 6 repeated groups. Each group has 3 Gated DeltaNet blocks followed by 1 full-attention block. So in the profiler, I expect to see something like:
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>[GDN + FFN] [GDN + FFN] [GDN + FFN] [Attention + FFN]
+[GDN + FFN] [GDN + FFN] [GDN + FFN] [Attention + FFN]
+...
+repeated 6 times</code></pre>
+
+        <p>Now, let's zoom into the first peak and see what operations are going on in there.</p>
+
+        <figure>
+          <img src="artifacts/llm_profiling/prefill_first_peak.png" class="mx-auto my-4 rounded border border-gray-300" />
+          <figcaption>The first peak is a little larger because it includes extra setup and indexing/copy work.</figcaption>
+        </figure>
+
+        <p>
+          Why do I think the first peak in the first group is way larger than the others? 
+          My assumption is going to be that the first hybrid block usually has some extra setup cost compared to the other blocks.
+        </p>
+
+        <p>Now scroll onto the next 2 peaks and the smaller peak within the first group.</p>
+
+        <figure>
+          <img src="artifacts/llm_profiling/prefill_234.png" class="mx-auto my-4 rounded border border-gray-300" />
+          <figcaption>The next peaks line up with GDN blocks and the smaller full-attention block.</figcaption>
+        </figure>
+
+        <p>
+          These are the GDN blocks including kernels like:
+        </p>
+
+        <ul class="list-disc pl-6 space-y-2">
+          <li><code class="bg-stone-200 px-1 rounded">causal_conv1d_fn</code></li>
+          <li><code class="bg-stone-200 px-1 rounded">fused_qkv_split_gdn_prefill</code></li>
+          <li><code class="bg-stone-200 px-1 rounded">fused_gdn_gating</code></li>
+          <li><code class="bg-stone-200 px-1 rounded">ChunkGatedDeltaRuleFunction</code></li>
+          <li><code class="bg-stone-200 px-1 rounded">l2norm_fwd</code></li>
+          <li><code class="bg-stone-200 px-1 rounded">chunk_local_cumsum</code></li>
+          <li><code class="bg-stone-200 px-1 rounded">chunk_gated_delta_rule_fwd_kkt_solve</code></li>
+          <li><code class="bg-stone-200 px-1 rounded">recompute_w_u_fwd</code></li>
+          <li><code class="bg-stone-200 px-1 rounded">chunk_gated_delta_rule_fwd_h</code></li>
+          <li><code class="bg-stone-200 px-1 rounded">chunk_fwd_kernel_o</code></li>
+        </ul>
+
+        <p>You can also verify this by clicking on the kernels in the GPU section</p>
+        <figure>
+          <img src="artifacts/llm_profiling/prefill_kernels.png" class="mx-auto my-4 rounded border border-gray-300" />
+          <figcaption>prefill side kernels</figcaption>
+        </figure>
+   
+        <p>
+          The smaller fourth peak is the full-attention block which uses FlashInfer. For this short prompt of 45 tokens, full attention is not actually the bottleneck. 
+        </p>
+
+        <p> Pattern alert! From the kernels section, we have repeating green thick sections and towards the end a final big blue kernel. Keep this mind for the next section.</p>
+     
+
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">The Final Vocab Projection</h2>
+
+        <figure>
+          <img src="artifacts/llm_profiling/prefill_final_cleanup.png" class="mx-auto my-4 rounded border border-gray-300" />
+          <figcaption>After the layer stack, SGLang prepares decode and computes logits for sampling.</figcaption>
+        </figure>
+
+        <p>
+          If you push past the whole repeating peaks into the final section, the server moves into cleanup and prepares for decode. This includes the final projection to logits, sampling, and copying the result back to CPU. This section is easy to ignore, but in this trace the logits processor contains one of the most expensive kernels.
+        </p>
+
+        <p>
+          If you click the CPU side <code class="bg-stone-200 px-1 rounded">aten::mm</code> and expand the args, PyTorch shows:
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>Input type:    ['c10::BFloat16', 'c10::BFloat16']
+Input strides: [[1024, 1], [1, 1024]]
+Input dims:    [[1, 1024], [1024, 248320]]</code></pre>
+
+        <p>
+          Conceptually, this is:
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>[1, 1024] @ [1024, 248320] = [1, 248320]</code></pre>
+
+        <p>
+          Since the vocab size is huge, this turns into a large matrix vector style projection. Even though it runs only once during prefill for this prompt, it is still one of the slowest kernels in the section.
+        </p>
+
+        <figure>
+          <img src="artifacts/llm_profiling/prefill_gemv.png" class="mx-auto my-4 rounded border border-gray-300" />
+          <figcaption>The vocab projection kernel details.</figcaption>
+        </figure>
+
+        <p>
+          The kernel details are also quite useful to read (you can do more with Nsight)
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>grid:  [31040, 1, 1]
+block: [8, 8, 1]
+registers/thread: 168
+shared memory: 288
+occupancy: 25%</code></pre>
+
+        <p>
+          What's the grid shape?
+        </p>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>248320 vocab elements / 8 = 31040</code></pre>
+
+        <p>
+          Cool, the final linear head is projecting one 1024 wide hidden vector across a very large vocab dimension. If I were optimizing this path, I would look closely at whether this projection can be fused or look for similar optimizations.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Top Prefill Kernels</h2>
+
+        <p>
+          Now let's look at the most prominent kernels that are running in this workload.
+        </p>
+
+        <div class="my-6 overflow-x-auto">
+          <table class="w-full text-sm border-collapse">
+            <thead>
+              <tr class="border-b-2 border-gray-300">
+                <th class="text-left py-3 px-4 font-semibold text-gray-700">Kernel</th>
+                <th class="text-right py-3 px-4 font-semibold text-gray-700">Total</th>
+                <th class="text-right py-3 px-4 font-semibold text-gray-700">Count</th>
+                <th class="text-right py-3 px-4 font-semibold text-gray-700">Avg</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="border-b border-gray-200 hover:bg-orange-100">
+                <td class="py-2 px-4 font-mono">gemvx::kernel...</td>
+                <td class="text-right py-2 px-4">2063.7 us</td>
+                <td class="text-right py-2 px-4">1</td>
+                <td class="text-right py-2 px-4">2063.7 us</td>
+              </tr>
+              <tr class="border-b border-gray-200 hover:bg-orange-100">
+                <td class="py-2 px-4 font-mono">ampere_bf16_s16816gemm_bf16_128x128...</td>
+                <td class="text-right py-2 px-4">1705.4 us</td>
+                <td class="text-right py-2 px-4">24</td>
+                <td class="text-right py-2 px-4">71.1 us</td>
+              </tr>
+              <tr class="border-b border-gray-200 hover:bg-orange-100">
+                <td class="py-2 px-4 font-mono">cutlass_80_wmma_tensorop_bf16_32x32...</td>
+                <td class="text-right py-2 px-4">1553.5 us</td>
+                <td class="text-right py-2 px-4">18</td>
+                <td class="text-right py-2 px-4">86.3 us</td>
+              </tr>
+              <tr class="border-b-2 border-gray-300 hover:bg-orange-100">
+                <td class="py-2 px-4 font-mono">ampere_bf16_s16816gemm_bf16_64x64...</td>
+                <td class="text-right py-2 px-4">848.1 us</td>
+                <td class="text-right py-2 px-4">24</td>
+                <td class="text-right py-2 px-4">35.3 us</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          The final gemv kernel is indeed the most expensive despite being invoked only a single time. The 128x128 BF16 GEMM appears 24 times, which lines up with one large projection-style operation per block. The smaller CUTLASS BF16 GEMM appears 18 times, which lines up nicely with the 18 GDN blocks.
+        </p>
+
+        <p>
+          Kernel names alone can be quite noisy and hard to understand sometimes, so understanding the model layout and data flow together can make the trace much easier to reason about.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Decode Phase</h2>
+
+        <figure>
+          <img src="artifacts/llm_profiling/decode-passes.png" class="mx-auto my-4 rounded border border-gray-300" />
+          <figcaption>The decode region. Since I profiled two steps, there are two decode passes.</figcaption>
+        </figure>
+
+        <p>
+          Decode is a different workload compared to prefill. During prefill, the model processes the entire prompt sequence so many operations have enough work to become decent GEMMs. But during decode with smaller batch sizees, the model is mostly processing one new token at a time and a lot of projection work collapses into skinny matrix vector operations.
+        </p>
+
+        <figure>
+          <img src="artifacts/llm_profiling/decode_imp_phases.png" class="mx-auto my-4 rounded border border-gray-300" />
+          <figcaption>The highlighted region is the decode compute path to focus on.</figcaption>
+        </figure>
+
+        <p>
+          In this trace, the highlighted region is the important part. The surrounding regions is mostly profiler setup/shutdown, input setup, synchronization, and bookkeeping. Those are worth understanding, but they are not the main model compute path.
+        </p>
+
+        <figure>
+          <img src="artifacts/llm_profiling/decode-1.png" class="mx-auto my-4 rounded border border-gray-300" />
+          <figcaption>The first decode step, zoomed into CPU-side execution.</figcaption>
+        </figure>
+
+        <p>
+          On the left, SGLang loads the batch and copies this decode step's inputs into fixed CUDA graph buffers. 
+          In the middle is where the actual decode work happens. Suprise surprise! Unlike prefill, the CPU timeline does not show every model layer as a deep stack of individual launches, because the decode path is using CUDA graph replay.
+        </p>
+
+        <p>
+          Before the graph replay, there are a few small kernels and copies for setup. These are not the layer stack. They are mostly preparing the fixed buffers and execution state needed by the captured graph.
+        </p>
+
+        <figure>
+          <img src="artifacts/llm_profiling/decode_minimal_kernels.png" class="mx-auto my-4 rounded border border-gray-300" />
+          <figcaption>A few setup kernels run before the graph replay.</figcaption>
+        </figure>
+
+        <p>
+          Once you click into the graph replay region, the GPU kernels become visible under that replay. This is the view that matters for decode.
+        </p>
+
+        <figure>
+          <img src="artifacts/llm_profiling/decode-replay.png" class="mx-auto my-4 rounded border border-gray-300" />
+          <figcaption>Clicking the graph replay shows the kernels launched by the captured CUDA graph.</figcaption>
+        </figure>
+
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Decode Is Dominated by Skinny GEMV</h2>
+
+        <figure>
+          <img src="artifacts/llm_profiling/decode-kernels.png" class="mx-auto my-4 rounded border border-gray-300" />
+          <figcaption>The repeated blue bars are GEMV-family kernels.</figcaption>
+        </figure>
+
+        <p>
+          The repeated blue bars are the same GEMV family we saw around the vocab projection. In the decode phase, they just keep showing up and this is because for a batch size 1 decode, it simply turns many linear layers into matrix-vector style operations.
+        </p>
+
+        <p>
+          This is the core performance issue. GEMV has much lower arithmetic intensity than a large GEMM. You stream a lot of weights from memory, but there is not enough reuse to keep the tensor cores busy in the same way a chunky prefill GEMM can. So even on a GPU with plenty of compute, the decode path can become memory-bandwidth limited.
+        </p>
+
+        <p>
+          The tiny red/green/purple blips are other kernels from the hybrid blocks which are important, but for this batch size 1 run, the shape of the trace is mostly screaming one thing - the decode path is a long sequence of skinny projections.
+        </p>
+
+        <p>
+          This also explains why batching changes the story. If you increase batch size, some of these skinny operations become less skinny. The workload gets closer to GEMM-like behavior, and the GPU has more opportunity to reuse weights and do useful math per byte loaded. That does not make batching free, because KV cache, latency, scheduling, and memory pressure all matter, but it explains why single-request decode is such a hard shape for GPUs.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Where to go from here?</h2>
+
+        <p>
+          The next step from here would be to repeat this analysis with larger batches and longer prompts. That would separate which bottlenecks are specific to batch size 1 decode from the ones that stay painful even when the GPU has more parallel work to chew on.
+        </p>
+
+      </section>
     </article>
 
     <script>
