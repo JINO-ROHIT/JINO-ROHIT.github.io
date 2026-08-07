@@ -72,12 +72,12 @@
         </p>
 
         <ul class="list-disc pl-6 space-y-2">
-          <li>parameters - 0.8B</li>
-          <li>hidden size - 1024</li>
-          <li>embedding size - 248k</li>
-          <li>layers -24</li>
-          <li>a pattern of 6 groups of <code class="bg-stone-200 px-1 rounded">3 x (Gated DeltaNet + FFN)</code> followed by <code class="bg-stone-200 px-1 rounded">1 x (Gated Attention + FFN)</code></li>
-          <li>context length: 262k tokens</li>
+          <li>parameters - <strong>0.8B</strong></li>
+          <li>hidden dim - <strong>1024</strong></li>
+          <li>embedding dim - <strong>248k</strong></li>
+          <li>layers - <strong>24</strong></li>
+          <li>a pattern of <strong>6 groups of 3 x (Gated DeltaNet + FFN) followed by 1 x (Gated Attention + FFN)</strong></li>
+          <li>context length - <strong>262k tokens</strong></li>
         </ul>
 
         <p>
@@ -156,7 +156,15 @@ sglang serve --model-path Qwen/Qwen3.5-0.8B</code></pre>
         </p>
       </section>
 
-      <p> To view the traces, go to https://ui.perfetto.dev/ and load the traces generated after the profiling is done.</p>
+      <aside class="border-l-4 px-4 py-3 text-base text-gray-800">
+        <p>
+          To view the traces, open
+          <a href="https://ui.perfetto.dev/" class="font-semibold underline underline-offset-4 hover:text-orange-800">
+            Perfetto UI
+          </a>
+          and load the trace files generated after profiling finishes.
+        </p>
+      </aside>
       
       <section class="space-y-4">
         <h2 class="text-2xl font-serif font-bold text-gray-950">Prefill Section</h2>
