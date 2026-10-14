@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Boosting MiniCPM Multimodal Inference with Faster Image Preprocessing</title>
+
+    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-4VP1VKLPKJ"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag() { dataLayer.push(arguments); }
+      gtag("js", new Date());
+      gtag("config", "G-4VP1VKLPKJ");
+    </script>
+
+    <style>
+      figcaption {
+        text-align: center;
+        font-size: 0.85rem;
+        color: #6b7280;
+        margin-top: 0.5rem;
+        font-style: italic;
+      }
+    </style>
+  </head>
+
+  <body class="bg-orange-50 text-gray-900 w-full max-w-3xl mx-auto px-5 md:px-0 pb-20">
+    <nav class="flex justify-between items-center py-6 border-b border-gray-300">
+      <h1 class="font-serif text-3xl font-bold">Jino Rohit</h1>
+      <div class="flex gap-6 text-sm">
+        <a href="../index.html" class="hover:text-orange-600 transition">Home</a>
+        <a href="./blog.html" class="hover:text-orange-600 transition">Blogs</a>
+        <a href="../projects/projects.html" class="hover:text-orange-600 transition">Projects</a>
+      </div>
+    </nav>
+
+    <header class="mt-12">
+      <h1 class="font-serif text-4xl font-bold leading-tight text-gray-950">
+        Boosting MiniCPM Multimodal Inference with Faster Image Preprocessing
+      </h1>
+      <p class="text-sm text-gray-600 mt-4 italic">October 13, 2026 • 10 min read</p>
+    </header>
+
+    <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
+      <section class="space-y-4">
+        <p>
+          This wasn't even supposed to be a blog post btw, this started as a way for me to spend some time to understand the omni models present in sglang-omni.
+          I'd never expected this to land as a <a href="https://github.com/sgl-project/sglang-omni/pull/2487" class="font-semibold underline underline-offset-4 hover:text-orange-800">PR #2487</a> in sglang-omni but here we are.
+
+          I was particularly interested in the MiniCPM-o-4_5 and I would spend time reading the modules, the data flow and the CPU and GPU side operations involved in the end to end inference.
+        </p>
+
+        <p>
+          After a bit of experience with the repo, I wanted to start inspecting the heavy operations that were involved in the inference of the model. This is
+          when I noticed something really strange, there seemed to be a huge blob of image pre-processing steps happening that was taking upto 30-40% of the runtime.
+        </p>
+        <p>
+          The end result is the preprocessing part got about 7.9x faster, time to first token dropped from 176 ms to 82 ms, and a full 128-token request dropped by 5.4%.
+          So let's unpack what happened here.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Understanding the image processing step</h2>
+        <p>
+          Before an image can be fed to a vision encoder, it needs to go through a series of steps before it can become ready. In this case, the steps involve 
+          choosing a slice grid for large images, resizing the tiles, normalizing pixels and arranging them into a packed layout expected by the model.
+        </p>
+
+        <p>This is a good reminder that some models have a complicated pre-processing stage before it can even enter into the serving engine.</p>
+
+        <figure>
+          <img src="https://github.com/user-attachments/assets/b1c2cc43-c93a-4c44-9f54-3cbdb6d9377b" alt="Flame graph of the original CPU preprocessing scheduler" class="mx-auto my-4 rounded border border-gray-300 w-full" />
+          <figcaption>Original CPU preprocessing scheduler, from the profiling run attached to the PR.</figcaption>
+        </figure>
+
+        <p>
+          Now back to this stage, where do you think this phase was happening in the current setup? Yes!, the original flow was using a slower pillow operation running on CPU. 
+          Ive shuffled the highest demanding operations to the right so you can see well, the pillow resize was one of the slowest operation taking upto 30% of the sampled thread time. Image decode was another noticeable chunk.
+          There are also the other operations like normalization, patch unfolding, conversion, and the redundant copy but they arent very significant.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Doing the dumbest and fastest thing you can think of</h2>
+        <p>
+          I started going through the entire processing script and I noticed this specific line - 
+        </p>
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>source_image = image.copy().resize(
+    best_resize, resample=Image.Resampling.BICUBIC
+)</code></pre>
+        <p>
+          <code class="bg-stone-200 px-1 rounded">resize()</code> already returns a new image, so the copy is redundant(maybe there is a reason for this but i couldnt understand why).
+          Quickly Removing it moved the median resize and crop time for my 2430 x 1114 image from 54.44 ms to 53.91 ms. That is only about 1%, but it is a free allocation and memory copy gone. 
+        </p>
+        <figure>
+          <img src="minicpm_analysis_folder/minicpm_analysis/image.png" alt="The MiniCPM slice image code with a redundant copy before resize" class="mx-auto my-4 rounded border border-gray-300" />
+          <figcaption>The redundant copy was right before the overview resize.</figcaption>
+        </figure>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">A bit more serious work</h2>
+        <p>
+          I wanted to port this entire stage to the CUDA cores instead of using CPU cores. My reason for this was majorly two things:
+        </p>
+        <ul class="list-disc pl-6 space-y-2">
+          <li>It avoids preparing host tensors and then moving the packed result to the GPU.</li>
+          <li>CUDA cores are probably better at applying the same operations across millions of pixels at once.</li>
+        </ul>
+
+        <p>
+          So this is what I exactly did. After pillow decodes the image, a triton kernel performs the separable bicubic resize, then GPU operations normalize the pixels and pack them into MiniCPM patches. The processor also caches the fixed-point resize coefficients for image-size pairs it has already seen.
+          Remember before you do something like this, you need to ensure that the pixels don't diverge and you end up getting weird answers. In my case, I was able to match every pixel for each row.
+        </p>
+
+        <p>
+          This does <em>not</em> make image decoding a GPU operation. Decode is still on CPU, and after this change it became the most obvious remaining preprocessing hotspot. But the resize-to-tensor path no longer produces CPU tensors only to move them back to the GPU for the image encoder.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">So what did we manage to accomplish?</h2>
+        <figure>
+          <img src="https://github.com/user-attachments/assets/626a3e60-47fd-4a67-bc35-b4be59314983" alt="Flame graph of preprocessing after moving image operations to the GPU" class="mx-auto my-4 rounded border border-gray-300 w-full" />
+          <figcaption>Preprocessing scheduler after the GPU path, from the profiling run attached to the PR.</figcaption>
+        </figure>
+        <p>
+          The important visual difference is that the big preprocess plateau is gone. In the later stage, the wide green load block is the image decoder which is now the biggest remaining operation.
+        </p>
+
+
+        <p>
+          I tested on an NVIDIA A100 with the same image and prompt, generating 128 output tokens. The image-processor-only benchmark includes resizing, normalization, and patch packing, but excludes image decode and model inference.
+        </p>
+        <div class="overflow-x-auto">
+          <table class="w-full border-collapse border border-gray-300 text-base">
+            <thead>
+              <tr class="bg-orange-100">
+                <th class="border border-gray-300 px-4 py-2 text-left">Measurement</th>
+                <th class="border border-gray-300 px-4 py-2 text-right">CPU path</th>
+                <th class="border border-gray-300 px-4 py-2 text-right">GPU path</th>
+                <th class="border border-gray-300 px-4 py-2 text-right">Improvement</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="border border-gray-300 px-4 py-2">Image processor component</td>
+                <td class="border border-gray-300 px-4 py-2 text-right">47.02 ms</td>
+                <td class="border border-gray-300 px-4 py-2 text-right">5.98 ms</td>
+                <td class="border border-gray-300 px-4 py-2 text-right"><strong>7.86x</strong></td>
+              </tr>
+              <tr class="bg-orange-50">
+                <td class="border border-gray-300 px-4 py-2">Median first text token</td>
+                <td class="border border-gray-300 px-4 py-2 text-right">176 ms</td>
+                <td class="border border-gray-300 px-4 py-2 text-right">82 ms</td>
+                <td class="border border-gray-300 px-4 py-2 text-right"><strong>53.7%</strong></td>
+              </tr>
+              <tr>
+                <td class="border border-gray-300 px-4 py-2">Median complete request</td>
+                <td class="border border-gray-300 px-4 py-2 text-right">1.543 s</td>
+                <td class="border border-gray-300 px-4 py-2 text-right">1.459 s</td>
+                <td class="border border-gray-300 px-4 py-2 text-right"><strong>5.4%</strong></td>
+              </tr>
+              <tr class="bg-orange-50">
+                <td class="border border-gray-300 px-4 py-2">60 requests, two workers</td>
+                <td class="border border-gray-300 px-4 py-2 text-right">46.33 s</td>
+                <td class="border border-gray-300 px-4 py-2 text-right">44.80 s</td>
+                <td class="border border-gray-300 px-4 py-2 text-right"><strong>3.3%</strong></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          The component number looks huge because it isolates exactly the work we optimized. 
+          Full request latency only saves about 84 ms, because the model still has to generate the remaining 127 tokens. 
+          For me, I'm very happy with the TFTT number here because the model now starts responding much sooner, which is the part a user can immediately feel.
+        </p>
+
+      </section>
+
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Final Thoughts</h2>
+        <p>
+          The fun part of this experiment was that the optimization had nothing to do with writing a kernel. It began with me trying to understand the system a bit more in detail and a good observation. 
+        </p>
+        <p>
+          I'm sure there is still more work to do if you start digging in deeper. For me personally, even if the entire request latency hasn;t dgone down by a lot, cutting the TFTT almost in half and optimizing a metric that the user can immediately see for himself makes the system feel much better.
+        </p>
+      </section>
+    </article>
+  </body>
+</html>
