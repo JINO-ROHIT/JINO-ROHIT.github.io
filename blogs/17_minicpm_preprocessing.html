@@ -73,7 +73,7 @@
         <p>This is a good reminder that some models have a complicated pre-processing stage before it can even enter into the serving engine.</p>
 
         <figure>
-          <img src="https://github.com/user-attachments/assets/b1c2cc43-c93a-4c44-9f54-3cbdb6d9377b" alt="Flame graph of the original CPU preprocessing scheduler" class="mx-auto my-4 rounded border border-gray-300 w-full" />
+          <img src="./artifacts/minicpm/before_flame.png" alt="Flame graph of the original CPU preprocessing scheduler" class="mx-auto my-4 rounded border border-gray-300 w-full" />
           <figcaption>Original CPU preprocessing scheduler, from the profiling run attached to the PR.</figcaption>
         </figure>
 
@@ -97,7 +97,7 @@
           Quickly Removing it moved the median resize and crop time for my 2430 x 1114 image from 54.44 ms to 53.91 ms. That is only about 1%, but it is a free allocation and memory copy gone. 
         </p>
         <figure>
-          <img src="minicpm_analysis_folder/minicpm_analysis/image.png" alt="The MiniCPM slice image code with a redundant copy before resize" class="mx-auto my-4 rounded border border-gray-300" />
+          <img src="./artifacts/minicpm/copy.png" alt="The MiniCPM slice image code with a redundant copy before resize" class="mx-auto my-4 rounded border border-gray-300" />
           <figcaption>The redundant copy was right before the overview resize.</figcaption>
         </figure>
       </section>
@@ -125,7 +125,7 @@
       <section class="space-y-4">
         <h2 class="text-2xl font-serif font-bold text-gray-950">So what did we manage to accomplish?</h2>
         <figure>
-          <img src="https://github.com/user-attachments/assets/626a3e60-47fd-4a67-bc35-b4be59314983" alt="Flame graph of preprocessing after moving image operations to the GPU" class="mx-auto my-4 rounded border border-gray-300 w-full" />
+          <img src="./artifacts/minicpm/after_flame.png" alt="Flame graph of preprocessing after moving image operations to the GPU" class="mx-auto my-4 rounded border border-gray-300 w-full" />
           <figcaption>Preprocessing scheduler after the GPU path, from the profiling run attached to the PR.</figcaption>
         </figure>
         <p>
