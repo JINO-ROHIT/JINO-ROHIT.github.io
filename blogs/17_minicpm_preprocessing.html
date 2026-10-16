@@ -74,7 +74,7 @@
 
         <figure>
           <img src="./artifacts/minicpm/before_flame.png" alt="Flame graph of the original CPU preprocessing scheduler" class="mx-auto my-4 rounded border border-gray-300 w-full" />
-          <figcaption>Original CPU preprocessing scheduler, from the profiling run attached to the PR.</figcaption>
+          <figcaption>cpu pre-processing profiling run.</figcaption>
         </figure>
 
         <p>
@@ -98,7 +98,7 @@
         </p>
         <figure>
           <img src="./artifacts/minicpm/copy.png" alt="The MiniCPM slice image code with a redundant copy before resize" class="mx-auto my-4 rounded border border-gray-300" />
-          <figcaption>The redundant copy was right before the overview resize.</figcaption>
+          <figcaption>The redundant copy.</figcaption>
         </figure>
       </section>
 
@@ -126,7 +126,7 @@
         <h2 class="text-2xl font-serif font-bold text-gray-950">So what did we manage to accomplish?</h2>
         <figure>
           <img src="./artifacts/minicpm/after_flame.png" alt="Flame graph of preprocessing after moving image operations to the GPU" class="mx-auto my-4 rounded border border-gray-300 w-full" />
-          <figcaption>Preprocessing scheduler after the GPU path, from the profiling run attached to the PR.</figcaption>
+          <figcaption>profiling run after the change.</figcaption>
         </figure>
         <p>
           The important visual difference is that the big preprocess plateau is gone. In the later stage, the wide green load block is the image decoder which is now the biggest remaining operation.
