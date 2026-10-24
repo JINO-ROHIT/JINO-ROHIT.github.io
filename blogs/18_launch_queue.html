@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Understanding CUDA Launch Queues: Why Identical Transformer Layers Can Stall</title>
+
+    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-4VP1VKLPKJ"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag() { dataLayer.push(arguments); }
+      gtag("js", new Date());
+      gtag("config", "G-4VP1VKLPKJ");
+    </script>
+
+    <style>
+      figcaption {
+        text-align: center;
+        font-size: 0.85rem;
+        color: #6b7280;
+        margin-top: 0.5rem;
+        font-style: italic;
+      }
+    </style>
+  </head>
+
+  <body class="bg-orange-50 text-gray-900 w-full max-w-3xl mx-auto px-5 md:px-0 pb-20">
+    <nav class="flex justify-between items-center py-6 border-b border-gray-300">
+      <h1 class="font-serif text-3xl font-bold">Jino Rohit</h1>
+      <div class="flex gap-6 text-sm">
+        <a href="../index.html" class="hover:text-orange-600 transition">Home</a>
+        <a href="./blog.html" class="hover:text-orange-600 transition">Blogs</a>
+        <a href="../projects/projects.html" class="hover:text-orange-600 transition">Projects</a>
+      </div>
+    </nav>
+
+    <header class="mt-12">
+      <h1 class="font-serif text-4xl font-bold leading-tight text-gray-950">
+        Understanding CUDA Launch Queues: Why Identical Transformer Layers Can Stall
+      </h1>
+      <p class="text-sm text-gray-600 mt-4 italic">October 23, 2026 • 5 min read</p>
+    </header>
+
+    <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
+      <section class="space-y-4">
+        <p>
+          Imagine you have a transformer with 10 layers. Every layer has the same structure, the same tensor shapes,
+          and launches the same sequence of kernels. You open the profiler expecting to see the same pattern repeating 10 times.
+          But one layer seems to be significantly more expensive than the others. I mean what happened here?
+        </p>
+        <figure>
+          <a href="./artifacts/launch_queue/transformer_stall.svg">
+            <img src="./artifacts/launch_queue/transformer_stall.svg" alt="Profiler-style CPU timeline with ten transformer layers and a much wider layer_7 span" class="mx-auto my-4 rounded border border-gray-300 w-full" />
+          </a>
+          <figcaption>profiler trace</figcaption>
+        </figure>
+        <p>
+          This is super weird considering everything is identical and there shouldn't really be a reason for one layer to be taking this long right?
+        </p>
+        <p>
+          Keep reading, and I'll show you what I found.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">What happens when we launch a kernel?</h2>
+        <p>
+          A CUDA kernel launch is asynchronous with respect to the CPU. This means the CPU submits the work and can continue to do other things
+          while the GPU executes it. A CUDA stream is what gives those operations an order.
+          In the usual single-stream case, the next kernel executes after the earlier work in that stream.
+          This is the behavior described in the
+          <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/asynchronous-execution.html" class="font-semibold underline underline-offset-4 hover:text-orange-800">CUDA asynchronous execution guide</a>.
+        </p>
+        <figure>
+          <img src="./artifacts/launch_queue/queue.png" alt="CPU submits kernels A, B, and C to a CUDA stream, and the GPU executes them in stream order" class="mx-auto my-4 rounded border border-gray-300 w-full" />
+          <figcaption>A useful way to picture submission and execution.</figcaption>
+        </figure>
+        <p>
+          For a transformer, this means the CPU can submit the operations for layer 2 while the GPU is still working
+          on layer 1. Layer 2 needs layer 1's output, but the CPU does not need to read that output to enqueue the next
+          operation. Keeping the dependent operations on the same stream preserves their execution order.
+        </p>
+        <p>
+          Cool, but quick question, can I keep adding work forever into this queue? I would like to think there probably has to be a limit to how much work can be queued up right?
+        </p>
+        <p>
+          NVIDIA's
+          <a href="https://docs.nvidia.com/cuda/cuda-runtime-api/api-sync-behavior.html" class="font-semibold underline underline-offset-4 hover:text-orange-800">runtime API documentation</a>
+          explicitly allows CUDA calls to block when internal resources are unavailable or contended.
+          So asynchronous execution does not guarantee that every launch call returns quickly under every condition.
+          Once submission runs out of room, the host can wait inside the launch call until GPU progress makes room for more work.
+          This is something we should pay attention to.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Trying this with the simplest possible experiment</h2>
+        <p>
+          To explore this on my RTX 4060 Ti, I used a naive 512 x 512 matmul and launched it repeatedly in the default
+          stream. Every launch uses the same inputs, output buffer, grid and block dimensions. There is no allocation
+          or memory copy inside the submission loop. All launches use one stream, so writing the same output buffer
+          is ordered.
+        </p>
+        <p>
+          The kernel is intentionally simple and slow enough that the CPU can build a backlog.
+          You can download the <a href="./artifacts/launch_queue/queue_kernels.cu" class="font-semibold underline underline-offset-4 hover:text-orange-800">full CUDA source</a>.
+          The timing section looks like this:
+        </p>
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>// Warm up and finish that work before starting the timer.
+matmul&lt;&lt;&lt;blocks, threads&gt;&gt;&gt;(a, b, c);
+cudaDeviceSynchronize();
+
+const auto submit_start = std::chrono::steady_clock::now();
+for (int i = 0; i &lt; kernel_count; ++i) {
+    matmul&lt;&lt;&lt;blocks, threads&gt;&gt;&gt;(a, b, c);
+}
+const auto submit_end = std::chrono::steady_clock::now();
+
+cudaDeviceSynchronize();
+const auto finish = std::chrono::steady_clock::now();</code></pre>
+
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>nvcc -O2 -lineinfo queue_kernels.cu -o queue_kernels
+./queue_kernels 2000
+
+nsys profile --trace=cuda,nvtx,osrt -o queue ./queue_kernels 2000
+nsys stats queue.nsys-rep
+nsys-ui queue.nsys-rep</code></pre>
+        <p>These are the host submission times recorded in my experiment:</p>
+        <div class="overflow-x-auto">
+          <table class="w-full border-collapse border border-gray-300 text-base">
+            <thead>
+              <tr class="bg-orange-100">
+                <th scope="col" class="border border-gray-300 px-4 py-2 text-left">Kernels submitted</th>
+                <th scope="col" class="border border-gray-300 px-4 py-2 text-right">Host submission time</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td class="border border-gray-300 px-4 py-2">1,000</td><td class="border border-gray-300 px-4 py-2 text-right">1.74 ms</td></tr>
+              <tr><td class="border border-gray-300 px-4 py-2">1,030</td><td class="border border-gray-300 px-4 py-2 text-right">1.78 ms</td></tr>
+              <tr><td class="border border-gray-300 px-4 py-2">1,050</td><td class="border border-gray-300 px-4 py-2 text-right">5.46 ms</td></tr>
+              <tr><td class="border border-gray-300 px-4 py-2">1,100</td><td class="border border-gray-300 px-4 py-2 text-right">15.24 ms</td></tr>
+              <tr><td class="border border-gray-300 px-4 py-2">1,200</td><td class="border border-gray-300 px-4 py-2 text-right">36.70 ms</td></tr>
+              <tr><td class="border border-gray-300 px-4 py-2">2,000</td><td class="border border-gray-300 px-4 py-2 text-right">202.68 ms</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Going from 1,000 to 1,030 launches barely changes the submission time. But going from 1,030 to 1,050
+          pushes it from 1.78 ms to 5.46 ms. That is the first obvious change in this table.
+          Doubling the number of launches from 1,000 to 2,000 makes the host submission time more than 100 times larger.
+        </p>
+
+        <p>
+          100x? That is a massive slowdown.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Open your profiler</h2>
+        <figure>
+          <a href="./artifacts/launch_queue/nsys.png">
+            <img src="./artifacts/launch_queue/nsys.png" alt="Nsight Systems trace showing short CUDA API launches initially, then much longer launch calls while GPU matmul kernels continue executing" class="mx-auto my-4 rounded border border-gray-300 w-full" />
+          </a>
+        </figure>
+        <p>
+          If you check the CUDA API lane in the Nsight Systems trace, you can see the same pattern. In the green region, the first 1,040 launches are short,
+          but after that in the red region the launch calls stretch out.
+        </p>
+
+        <p>
+          The reason? After 1,040 launches, the queue has hit its limit. This means that for the next launches, the CPU has to wait for the GPU to finish some of its work 
+          before it can submit more kernels!
+        </p>
+
+        <p>
+          This probably does not mean there is an exact queue capacity of 1,040 kernels. Some kernels have already completed
+          by the time that many launches have been submitted. The trace does not expose the exact internal buffer
+          that filled, either. I would treat this as an observed threshold for this workload and setup, not a CUDA
+          constant to hardcode.
+        </p>
+      </section>
+
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Closing thoughts</h2>
+        <p>
+          This was a fun little experiment that helped me understand there are still some nuances and limits to consider when launching multiple CUDA kernels at once. 
+        </p>
+
+        <p>
+          I also have a follow up to this question, so what happens if we launch kernels in multiple streams? I will try to explore that in a future post!
+        </p>
+      </section>
+    </article>
+  </body>
+</html>
