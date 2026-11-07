@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="An introduction to AMD GPUs for CUDA programmers. Follow a kernel through CUs, wavefronts, registers, LDS, and matrix cores, comparing MI300X with NVIDIA H100." />
+    <title>Intro to AMD GPUs (Part 1) - From CUDA to CDNA</title>
+
+    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-4VP1VKLPKJ"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag() { dataLayer.push(arguments); }
+      gtag("js", new Date());
+      gtag("config", "G-4VP1VKLPKJ");
+    </script>
+    <style>
+      figcaption { text-align: center; font-size: 0.85rem; color: #6b7280; margin-top: 0.5rem; font-style: italic; }
+      article a { text-decoration: underline; text-underline-offset: 4px; }
+      article a:hover { color: #9a3412; }
+      article :not(pre) > code { font-size: 0.85em; background: #e7e5e4; border-radius: 3px; padding: 0.1em 0.25em; }
+      .comparison th, .comparison td { border: 1px solid #d1d5db; padding: 0.65rem 0.8rem; text-align: left; }
+      .comparison th { background: #ffedd5; }
+      .wave-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.45rem; }
+      .wave { border: 1px solid #9ca3af; border-radius: 5px; padding: 0.5rem 0.2rem; text-align: center; font: 0.75rem ui-monospace, monospace; }
+      .wave-nvidia { background: #ecfccb; border-color: #a3b554; }
+      .wave-amd { background: #ffedd5; border-color: #d6a173; }
+      @media (max-width: 420px) { .wave-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    </style>
+  </head>
+
+  <body class="bg-orange-50 text-gray-900 w-full max-w-3xl mx-auto px-5 md:px-0 pb-20">
+    <nav class="flex justify-between items-center py-6 border-b border-gray-300">
+      <h1 class="font-serif text-3xl font-bold">Jino Rohit</h1>
+      <div class="flex gap-6 text-sm">
+        <a href="../index.html" class="hover:text-orange-600 transition">Home</a>
+        <a href="./blog.html" class="hover:text-orange-600 transition">Blogs</a>
+        <a href="../projects/projects.html" class="hover:text-orange-600 transition">Projects</a>
+      </div>
+    </nav>
+
+    <header class="mt-12">
+      <h1 class="font-serif text-4xl font-bold leading-tight text-gray-950">Intro to AMD GPUs (Part 1) - From CUDA to CDNA</h1>
+      <p class="text-sm text-gray-600 mt-4 italic">November 6, 2026 • 10   min read</p>
+    </header>
+
+    <article class="mt-10 space-y-8 text-lg text-gray-800 leading-relaxed font-serif">
+      <section class="space-y-4">
+        <p>
+          Most of the GPU posts on this blog have been about the NVIDIA stack. I have spent a fair amount of time writing kernels on CUDA, DSLs like CUTEDSL, Triton and a tons of profiling work.
+          But I've been meaning to explore the AMD side of the stack and this is the first post in that series.
+        </p>
+        <p>
+          For people who already know CUDA, this blog should be extremely easy to follow. For the people new to GPU programming, do follow along as I will still be breaking down the kernels and the architecture in follow up posts.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Glossary</h2>
+        <p>
+          The first distinct term you've probably already come across is <strong>CDNA</strong> and <strong>RDNA</strong>. CDNA is simply the hardware architecture family used by AMD's Instinct compute accelerators. This means they are designed for HPC and AI workloads.
+          RDNA is the architecture family behind Radeon graphics GPUs and mainly aimed towards gamers. For this series, we are interested in the AI workloads.
+          If you want to have a quick comparison on what they mean on NVIDIA terms, they are similar to the generations like Ampere, Hopper and Blackwell.
+        </p>
+
+        <p>
+          <strong>ROCm is the software platform</strong> basically the compilers, runtimes, libraries, and tools that let us use that hardware.
+          <strong>HIP is a C++ programming interface within that platform</strong>, with a kernel language and runtime APIs that will look very familiar to a CUDA programmer.
+          AMD's <a href="https://rocm.docs.amd.com/en/latest/what-is-rocm.html">ROCm overview</a> explains how these pieces fit together.
+        </p>
+        <p>
+          So if someone says “this GPU uses ROCm,” that tells us about the software environment. We still need to know the GPU architecture
+          before deciding how to organize a kernel.
+        </p>
+        <div class="overflow-x-auto">
+          <table class="comparison w-full min-w-[48rem] border-collapse text-base">
+            <caption class="text-left text-sm text-gray-600 mb-2">AMD Instinct generations.</caption>
+            <thead>
+              <tr><th scope="col">AMD architecture</th><th scope="col">Example GPU</th><th scope="col">Compiler target</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>CDNA</td><td>MI100</td><td><code>gfx908</code></td></tr>
+              <tr><td>CDNA 2</td><td>MI250X</td><td><code>gfx90a</code></td></tr>
+              <tr><td>CDNA 3</td><td>MI300X</td><td><code>gfx942</code></td></tr>
+              <tr><td>CDNA 4</td><td>MI350X</td><td><code>gfx950</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="text-base">
+          These mappings are listed in AMD's <a href="https://rocm.docs.amd.com/en/latest/reference/gpu-arch-specs.html">hardware specifications</a>.
+          A target such as <code>gfx942</code> or <code>sm_90(nvidia)</code> tells the compiler which device instruction set to generate code for.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Let's get hands on</h2>
+        <p>
+          Starting with the good ol addition where each thread reads one element from A and B, adds them, and writes the result to C.
+        </p>
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>#include &lt;hip/hip_runtime.h&gt;
+
+__global__ void vector_add(const float* a, const float* b,
+                           float* c, int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i &lt; n) {
+        c[i] = a[i] + b[i];
+    }
+}
+
+// vector_add&lt;&lt;&lt;(n + 255) / 256, 256&gt;&gt;&gt;(a, b, c, n);</code></pre>
+        <p>
+          Oh wow, this looks almost exactly like CUDA, right? We have a grid, blocks, and threads. HIP keeps those names in the code.
+          The AMD architecture documentation also calls a block a <strong>workgroup</strong> and a thread a <strong>work-item</strong>.
+          The <a href="https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_cpp_language_extensions.html">HIP language reference</a>
+          documents these built-ins and the launch syntax.
+        </p>
+        <p>
+          On NVIDIA, a block is assigned to an <strong>SM, or Streaming Multiprocessor</strong>. For our ordinary HIP launch on MI300X,
+          the corresponding place to think about is a <strong>CU, or Compute Unit</strong>. A workgroup's threads execute on the same CU,
+          which lets them cooperate using its local resources.
+        </p>
+        <p>
+          This is a useful correspondence, but the resource counts and execution pipelines inside a CU differ from those inside an SM.
+          We cannot compare the number of CUs with the number of SMs and use that ratio to predict performance.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Our 256 threads become eight warps. Or four wavefronts.</h2>
+        <p>
+          On NVIDIA, the block is divided into groups of <strong>32 threads</strong> called warps.
+          On CDNA 3, the workgroup is divided into groups of <strong>64 threads</strong> called wavefronts, often shortened to waves.
+        </p>
+        <p>Let's take a look at that with our 256-thread block. You can change the block size below.</p>
+        <figure class="border border-gray-300 rounded-lg p-4 md:p-5 bg-orange-100/40">
+          <div class="flex flex-wrap items-center gap-3 mb-5 font-sans text-sm">
+            <label for="block-size" class="font-semibold">Threads per block</label>
+            <select id="block-size" class="border border-gray-400 rounded px-3 py-2 bg-orange-50">
+              <option value="64">64</option>
+              <option value="128">128</option>
+              <option value="256" selected>256</option>
+              <option value="512">512</option>
+            </select>
+          </div>
+          <div id="wave-comparison" aria-live="polite" aria-atomic="true" class="space-y-5">
+            <div>
+              <p id="nvidia-wave-count" class="font-sans text-sm font-semibold mb-2">NVIDIA: 8 warps x 32 threads</p>
+              <div id="nvidia-waves" class="wave-grid">
+                <div class="wave wave-nvidia">0-31</div><div class="wave wave-nvidia">32-63</div>
+                <div class="wave wave-nvidia">64-95</div><div class="wave wave-nvidia">96-127</div>
+                <div class="wave wave-nvidia">128-159</div><div class="wave wave-nvidia">160-191</div>
+                <div class="wave wave-nvidia">192-223</div><div class="wave wave-nvidia">224-255</div>
+              </div>
+            </div>
+            <div>
+              <p id="amd-wave-count" class="font-sans text-sm font-semibold mb-2">AMD CDNA 3: 4 wavefronts x 64 threads</p>
+              <div id="amd-waves" class="wave-grid">
+                <div class="wave wave-amd">0-63</div><div class="wave wave-amd">64-127</div>
+                <div class="wave wave-amd">128-191</div><div class="wave wave-amd">192-255</div>
+              </div>
+            </div>
+          </div>
+          <figcaption>Each box shows the thread IDs in one warp or wavefront. This illustrates grouping, not execution time.</figcaption>
+        </figure>
+        <p>
+          We still launched 256 threads on both GPUs. Having half as many waves does not mean we did half the work,
+          or that each AMD wave takes twice as long. A warp's width only describes its thread grouping while the instruction latency and throughput
+          depend on the execution pipeline and the particular instruction.
+        </p>
+        <p>
+          Also, <strong>64 is our CDNA assumption</strong>. RDNA supports different wave modes, so “AMD always means 64” is a bad rule to bake into portable code.
+          Use <code>warpSize</code> in HIP device code and query the device properties on the host, as described in the
+          <a href="https://rocm.docs.amd.com/projects/HIP/en/docs-7.1.0/how-to/hip_porting_guide.html">HIP porting guide</a>.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Our shared memory tiles now live in LDS</h2>
+        <p>
+          In the <a href="./06_tiling.html">tiled matmul post</a>, we loaded tiles of A and B into shared memory so that threads could reuse them.
+          On AMD, the on chip memory for that is called <strong>LDS, or Local Data Share</strong>.
+          HIP still uses <code>__shared__</code> to declare it and <code>__syncthreads()</code> for a block barrier.
+        </p>
+
+        <div class="overflow-x-auto">
+          <table class="comparison w-full border-collapse text-base">
+            <thead><tr><th scope="col">Resource</th><th scope="col">AMD MI300X</th><th scope="col">NVIDIA H100</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Cooperating thread group</th><td>Workgroup / HIP block</td><td>Thread block / CTA</td></tr>
+              <tr><th scope="row">Execution grouping</th><td>64-thread wavefront</td><td>32-thread warp</td></tr>
+              <tr><th scope="row">On-chip scratchpad</th><td>64 KiB LDS per CU</td><td>Up to 228 KiB shared memory per SM</td></tr>
+              <tr><th scope="row">Matrix operations</th><td>Matrix cores, MFMA instructions</td><td>Tensor Cores, MMA / WGMMA instructions</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="text-base">
+          Capacities come from AMD's <a href="https://rocm.docs.amd.com/en/docs-6.3.3/reference/gpu-arch-specs.html">MI300X specification table</a>
+          and NVIDIA's <a href="https://docs.nvidia.com/cuda/hopper-tuning-guide/index.html">Hopper tuning guide</a>.
+          H100's maximum per-block allocation is 227 KiB, with explicit opt-in required for large dynamic allocations.
+        </p>
+        <p>
+          Let's do a small calculation. Suppose a matmul block computes a 128 x 128 output tile, stepping through K in chunks of 32,
+          with FP16 inputs. Its A tile is 128 x 32 and its B tile is 32 x 128.
+        </p>
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>A tile = 128 x 32 x 2 bytes =  8 KiB
+B tile =  32 x 128 x 2 bytes = 8 KiB
+One stage                   = 16 KiB
+Two buffered stages         = 32 KiB</code></pre>
+        <p>
+          On MI300X, those two stages already use half the CU's LDS capacity, before padding or other shared storage.
+          LDS capacity alone would allow at most two such workgroups to reside on a CU. Registers and other limits may reduce that further.
+          A tile shape that worked well on H100 might not work here and you might need to think of a different strategy.
+        </p>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">What replaces Tensor Cores?</h2>
+        <p>
+          For matrix multiplication, CDNA has dedicated <strong>matrix cores</strong>. We access them through
+          <strong>MFMA, or Matrix Fused Multiply-Add</strong>, instructions that compute small matrix products and add them to accumulators.
+          This serves the same broad purpose as the Tensor Core operations we used on NVIDIA.
+        </p>
+        <p>
+          The key detail is the distribution of matrix elements across lanes. An MFMA is a cooperative wave operation.
+          Each lane supplies part of the operands and owns part of the result. AMD's
+          <a href="https://rocm.blogs.amd.com/software-tools-optimization/matrix-cores-cdna/README.html">CDNA matrix-core guide</a>
+          works through those layouts for specific instructions.
+        </p>
+        <p>
+          This is pretty similar to the <a href="./04_wmma.html">WMMA post</a> where one thread did not independently own the whole matrix tile.
+          We had to get the fragments into the form expected by the instruction.
+        </p>
+        <p>
+          So an optimized port needs to choose the AMD matrix instruction first, then work out how to load and distribute its operands.
+          Copying a CUDA fragment layout and changing the instruction name is not enough. We will work through an actual MFMA tile later in the series.
+        </p>
+      </section>
+
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Nvidia vs AMD existing stack</h2>
+
+        <p>
+          If we call a matrix multiplication from PyTorch, the framework can dispatch to a library implementation.
+          If we write our own HIP kernel, we choose the grid and block configuration ourselves. Either way, the compiled work
+          eventually runs on the CUs we have been discussing.
+        </p>
+        <div class="overflow-x-auto">
+          <table class="comparison w-full border-collapse text-base">
+            <caption class="text-left text-sm text-gray-600 mb-2">Starting points for familiar tasks.</caption>
+            <thead><tr><th scope="col">What we need</th><th scope="col">NVIDIA starting point</th><th scope="col">ROCm starting point</th></tr></thead>
+            <tbody>
+              <tr><td>Custom C++ kernel</td><td>CUDA C++</td><td>HIP C++</td></tr>
+              <tr><td>BLAS / matrix multiplication</td><td>cuBLAS, cuBLASLt</td><td>rocBLAS / hipBLAS, hipBLASLt</td></tr>
+              <tr><td>Deep learning primitives</td><td>cuDNN</td><td>MIOpen</td></tr>
+              <tr><td>Compose specialized kernels</td><td>CUTLASS</td><td>Composable Kernel / CK Tile</td></tr>
+              <tr><td>Multi-GPU collectives</td><td>NCCL</td><td>RCCL</td></tr>
+              <tr><td>Timeline and kernel analysis</td><td>Nsight Systems, Nsight Compute</td><td>ROCm Systems Profiler, ROCm Compute Profiler</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="text-base">
+          AMD's <a href="https://rocm.docs.amd.com/en/latest/reference/api-libraries.html">library catalog</a>
+          and <a href="https://rocm.docs.amd.com/en/latest/components/core.html#profiling-and-debugging-tools">tool catalog</a> are the places to check supported functionality for your release.
+        </p>
+
+      </section>
+
+      <section class="space-y-4" id="hipify">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">Can we convert our existing CUDA code?</h2>
+        <p>
+          We wrote the vector-add kernel in HIP earlier, but suppose we already have a working CUDA program.
+          Do we have to go through the entire file changing every allocation, copy, and stream call ourselves?
+        </p>
+        <p>
+          AMD provides <strong>HIPIFY</strong> to automate supported CUDA-to-HIP source conversions.
+          It handles familiar changes such as replacing the runtime header and translating CUDA API names to their HIP counterparts.
+          Here are a few examples from the <a href="https://rocm.docs.amd.com/projects/HIPIFY/en/latest/reference/tables/CUDA_Runtime_API_functions_supported_by_HIP.html">API mapping reference</a>:
+        </p>
+        <div class="overflow-x-auto">
+          <table class="comparison w-full border-collapse text-base">
+            <thead><tr><th scope="col">CUDA</th><th scope="col">HIP</th></tr></thead>
+            <tbody>
+              <tr><td><code>cuda_runtime.h</code></td><td><code>hip/hip_runtime.h</code></td></tr>
+              <tr><td><code>cudaMalloc</code> / <code>cudaFree</code></td><td><code>hipMalloc</code> / <code>hipFree</code></td></tr>
+              <tr><td><code>cudaMemcpy</code></td><td><code>hipMemcpy</code></td></tr>
+              <tr><td><code>cudaMemcpyHostToDevice</code></td><td><code>hipMemcpyHostToDevice</code></td></tr>
+              <tr><td><code>cudaStreamCreate</code></td><td><code>hipStreamCreate</code></td></tr>
+              <tr><td><code>cudaDeviceSynchronize</code></td><td><code>hipDeviceSynchronize</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          For example, this host-side copy changes as follows. Assume the source and destination buffers are already allocated:
+        </p>
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code>// CUDA
+cudaMemcpy(d_a, h_a, bytes, cudaMemcpyHostToDevice);
+
+// HIP
+hipMemcpy(d_a, h_a, bytes, hipMemcpyHostToDevice);</code></pre>
+        <p>
+          Our kernel's <code>threadIdx.x</code>, <code>blockIdx.x</code>, and <code>__global__</code> syntax are already familiar to HIP.
+          Simple code can therefore need relatively few changes. HIPIFY also knows supported library mappings,
+          but the coverage depends on the API and tool version.
+        </p>
+        <h3 class="text-xl font-serif font-semibold text-gray-950">hipify-perl and hipify-clang</h3>
+        <p>
+          There are two tools worth knowing about.
+          <a href="https://rocm.docs.amd.com/projects/HIPIFY/en/latest/how-to/hipify-perl.html"><strong>hipify-perl</strong></a>
+          uses pattern matching and is easy to try on a small source file. It does not require a CUDA installation to perform the translation,
+          but complex macros and C++ constructs can need manual attention.
+        </p>
+        <p>
+          <a href="https://rocm.docs.amd.com/projects/HIPIFY/en/latest/how-to/hipify-clang.html"><strong>hipify-clang</strong></a>
+          parses the CUDA source into an abstract syntax tree, which gives it more context for the conversion.
+          It needs a compatible CUDA installation and the headers and compiler definitions required to parse the project.
+          For a larger codebase, supplying the project's compilation database can help provide that context.
+        </p>
+        <p>
+          Given a <strong>complete CUDA program</strong> in <code>vector_add.cu</code>, with HIPIFY and the ROCm development tools installed,
+          a small MI300X port could start like this:
+        </p>
+        <pre class="bg-stone-900 text-stone-100 p-4 rounded-lg overflow-x-auto text-sm"><code># Translate into a separate source file.
+hipify-perl vector_add.cu -o vector_add.hip.cpp
+
+# Review the conversion.
+diff -u vector_add.cu vector_add.hip.cpp
+
+# Compile the HIP program for MI300X.
+hipcc -O2 --offload-arch=gfx942 vector_add.hip.cpp -o vector_add
+
+# Run on a machine with the target GPU and a compatible ROCm runtime.
+./vector_add</code></pre>
+        <p>
+          Notice that translation and compilation are separate steps. <strong>HIPIFY produces HIP source</strong>.
+          Then <code>hipcc</code> invokes the toolchain to compile the host and device code for our selected target.
+          We are recompiling the program for AMD hardware, an existing NVIDIA executable does not become an AMD executable through API renaming.
+          The <a href="https://rocm.docs.amd.com/projects/HIP/en/latest/understand/compilers.html">HIP compiler guide</a> describes this compilation path.
+
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif font-bold text-gray-950">What next</h2>
+
+        <p>
+          I want to explore the MI300X architecture in more detail, so the next post will be a walkthrough of the hardware design in detail. Until then, ciao!
+        </p>
+
+      </section>
+
+    </article>
+
+    <script>
+      (() => {
+        const control = document.getElementById("block-size");
+        const targets = [
+          { id: "nvidia", width: 32, name: "NVIDIA", unit: "warps" },
+          { id: "amd", width: 64, name: "AMD CDNA 3", unit: "wavefronts" }
+        ];
+
+        function renderWaves() {
+          const threads = Number(control.value);
+          for (const target of targets) {
+            const grid = document.getElementById(`${target.id}-waves`);
+            const count = threads / target.width;
+            const cells = [];
+            for (let first = 0; first < threads; first += target.width) {
+              const cell = document.createElement("div");
+              cell.className = `wave wave-${target.id}`;
+              cell.textContent = `${first}-${first + target.width - 1}`;
+              cells.push(cell);
+            }
+            grid.replaceChildren(...cells);
+            document.getElementById(`${target.id}-wave-count`).textContent =
+              `${target.name}: ${count} ${count === 1 ? (target.id === "amd" ? "wavefront" : "warp") : target.unit} x ${target.width} threads`;
+          }
+        }
+
+        control.addEventListener("change", renderWaves);
+        renderWaves();
+      })();
+    </script>
+  </body>
+</html>
