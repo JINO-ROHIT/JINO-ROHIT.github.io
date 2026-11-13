@@ -38,60 +38,101 @@
         <a href="./projects.html" class="hover:text-orange-600 transition">Projects</a>
       </div>
     </nav>
-
-
     <section class="mt-8">
-  <h2 class="text-2xl font-semibold mb-6">Featured Projects</h2>
+      <h2 class="text-2xl font-semibold mb-6">Featured Projects</h2>
 
-  <ul class="list-none space-y-4">
+      <ul class="list-none space-y-4">
+        <li>
+          <a href="./mi300x-explorer/dist/index.html" class="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4 hover:underline underline-offset-4 py-2">
+            <span class="text-gray-500 sm:w-40 shrink-0">Interactive</span>
+            <span class="flex-1 min-w-0 font-mono text-lg">
+              MI300X Visualizer - An interactive GPU architecture explorer covering chiplets, compute units, wavefronts, matrix instructions, and memory operations.
+            </span>
+          </a>
+        </li>
 
-    <a href="https://github.com/JINO-ROHIT/gpt-triton" target="_blank" class="block">
-      <li class="flex justify-between items-center hover:underline underline-offset-4 py-2">
-        <span class="text-gray-500 w-40">Python</span>
-        <span class="flex-1 font-mono text-lg">
-          Tachyon - a educational LLM inference engine to run on consumer hardware. It generates 600 toks/​s on an RTX 4060 Ti.
-        </span>
-      </li>
-    </a>
+        <li>
+          <a href="https://github.com/JINO-ROHIT/noro" target="_blank" rel="noopener noreferrer" class="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4 hover:underline underline-offset-4 py-2">
+            <span class="text-gray-500 sm:w-40 shrink-0">Python / Triton</span>
+            <span class="flex-1 min-w-0 font-mono text-lg">
+              Noro - An image and video inference library with a Krea-2 Turbo pipeline, custom Triton kernels, and compiled inference benchmarks against Diffusers.
+            </span>
+          </a>
+        </li>
 
-    <a href="https://github.com/JINO-ROHIT/fastcv" target="_blank" class="block">
-      <li class="flex justify-between items-center hover:underline underline-offset-4 py-2">
-        <span class="text-gray-500 w-40">C++ / CUDA</span>
-        <span class="flex-1 font-mono text-lg">
-          fastcv - fastcv is a C++ CUDA rewrite with Pytorch bindings of the image filters in the OpenCV library.
-        </span>
-      </li>
-    </a>
+        <li>
+          <a href="https://github.com/JINO-ROHIT/ml-systems-notes" target="_blank" rel="noopener noreferrer" class="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4 hover:underline underline-offset-4 py-2">
+            <span class="text-gray-500 sm:w-40 shrink-0">ML Systems</span>
+            <span class="flex-1 min-w-0 font-mono text-lg">
+              ML Systems Notes - My notes and experiments on distributed training, parallelism, quantization, PyTorch internals, and roofline analysis.
+            </span>
+          </a>
+        </li>
 
-    <a href="https://github.com/JINO-ROHIT/inferGPT" target="_blank" class="block">
-      <li class="flex justify-between items-center hover:underline underline-offset-4 py-2">
-        <span class="text-gray-500 w-40">C / C++</span>
-        <span class="flex-1 font-mono text-lg">
-          InferGPT - A high performance C/C++ inference engine for GPT based architectures that runs on CPU.
-        </span>
-      </li>
-    </a>
+        <li>
+          <a href="https://github.com/JINO-ROHIT/kernels" target="_blank" rel="noopener noreferrer" class="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4 hover:underline underline-offset-4 py-2">
+            <span class="text-gray-500 sm:w-40 shrink-0">CUDA / CuTe / Triton</span>
+            <span class="flex-1 min-w-0 font-mono text-lg">
+              Kernels - GPU kernel experiments in CUDA C++, CuTe DSL, and Triton, covering GEMM, reductions, softmax, and AMD GPU kernels.
+            </span>
+          </a>
+        </li>
 
-    <a href="https://github.com/JINO-ROHIT/inferGPT" target="_blank" class="block">
-      <li class="flex justify-between items-center hover:underline underline-offset-4 py-2">
-        <span class="text-gray-500 w-40">CUDA C++</span>
-        <span class="flex-1 font-mono text-lg">
-          Kernels - A collection of CUDA C++ and CuTe DSL kernels written for matrix multiplication.
-        </span>
-      </li>
-    </a>
+        <li>
+          <a href="https://github.com/JINO-ROHIT/blackwell_kernels" target="_blank" rel="noopener noreferrer" class="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4 hover:underline underline-offset-4 py-2">
+            <span class="text-gray-500 sm:w-40 shrink-0">CUDA / Blackwell</span>
+            <span class="flex-1 min-w-0 font-mono text-lg">
+              Blackwell Kernels - Matrix multiplication kernels exploring TMA, pipelining, and warp specialization, with cuBLAS benchmarks and profiling on Modal.
+            </span>
+          </a>
+        </li>
 
-    <a href="https://github.com/JINO-ROHIT/advanced_ml" target="_blank" class="block">
-      <li class="flex justify-between items-center hover:underline underline-offset-4 py-2">
-        <span class="text-gray-500 w-40">ML Theory</span>
-        <span class="flex-1 font-mono text-lg">
-          Advanced ML - A collection of advanced machine learning topics implemented from scratch.
-        </span>
-      </li>
-    </a>
+        <li>
+          <a href="https://github.com/JINO-ROHIT/llm-profiling-guide" target="_blank" rel="noopener noreferrer" class="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4 hover:underline underline-offset-4 py-2">
+            <span class="text-gray-500 sm:w-40 shrink-0">Profiling</span>
+            <span class="flex-1 min-w-0 font-mono text-lg">
+              LLM Profiling Guide - A walkthrough of prefill and decode traces, CUDA graph replay, and GPU kernel bottlenecks in Qwen3.5 inference with SGLang.
+            </span>
+          </a>
+        </li>
 
-  </ul>
-</section>
+        <li>
+          <a href="https://github.com/JINO-ROHIT/tachyon" target="_blank" rel="noopener noreferrer" class="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4 hover:underline underline-offset-4 py-2">
+            <span class="text-gray-500 sm:w-40 shrink-0">Python</span>
+            <span class="flex-1 min-w-0 font-mono text-lg">
+              Tachyon - An LLM inference engine for consumer hardware with continuous batching, prefix caching, and an OpenAI-compatible API.
+            </span>
+          </a>
+        </li>
+
+        <li>
+          <a href="https://github.com/JINO-ROHIT/fastcv" target="_blank" rel="noopener noreferrer" class="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4 hover:underline underline-offset-4 py-2">
+            <span class="text-gray-500 sm:w-40 shrink-0">C++ / CUDA</span>
+            <span class="flex-1 min-w-0 font-mono text-lg">
+              fastcv - A CUDA C++ rewrite of OpenCV image filters with Python bindings.
+            </span>
+          </a>
+        </li>
+
+        <li>
+          <a href="https://github.com/JINO-ROHIT/inferGPT" target="_blank" rel="noopener noreferrer" class="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4 hover:underline underline-offset-4 py-2">
+            <span class="text-gray-500 sm:w-40 shrink-0">C / C++</span>
+            <span class="flex-1 min-w-0 font-mono text-lg">
+              InferGPT - A C/C++ inference engine for GPT architectures that runs on CPU.
+            </span>
+          </a>
+        </li>
+
+        <li>
+          <a href="https://github.com/JINO-ROHIT/advanced_ml" target="_blank" rel="noopener noreferrer" class="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4 hover:underline underline-offset-4 py-2">
+            <span class="text-gray-500 sm:w-40 shrink-0">ML Theory</span>
+            <span class="flex-1 min-w-0 font-mono text-lg">
+              Advanced ML - A collection of advanced machine learning topics implemented from scratch.
+            </span>
+          </a>
+        </li>
+      </ul>
+    </section>
 
     <script>
       lucide.createIcons();

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Explore AMD MI300X in 3D. Descend from the accelerator package to XCDs, compute units, wavefronts, and matrix instructions. An interactive guide by Jino Rohit." />
+  <meta name="theme-color" content="#f5f3ed" />
+  <title>Inside the MI300X — An interactive architecture atlas</title>
+  <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+  <link rel="stylesheet" href="./style.css" />
+  <script type="importmap">{"imports":{"three":"./vendor/three.module.js","three/addons/controls/OrbitControls.js":"./vendor/OrbitControls.js"}}</script>
+</head>
+<body>
+  <a class="skip-link" href="#content">Skip to the guide</a>
+  <header class="site-header">
+    <a class="identity" href="#read/package" aria-label="Inside MI300X home"><span class="identity-mark" aria-hidden="true">JR<span></span></span><span>JINO ROHIT<small>AN ARCHITECTURE ATLAS</small></span></a>
+    <nav class="mode-switch" aria-label="Explorer mode"><button class="active" data-mode="read" aria-pressed="true">Read</button><button data-mode="explore" aria-pressed="false">Explore</button><button data-mode="trace" aria-pressed="false">Trace</button></nav>
+    <div class="header-actions"><button id="compare-open" class="text-button">Compare H100 <span aria-hidden="true">↗</span></button><button id="sources-open" class="icon-button" aria-label="Open sources and model notes" title="Sources and model notes">i</button><button id="help-open" class="icon-button" aria-label="Keyboard shortcuts and controls" title="Controls">?</button></div>
+  </header>
+
+  <main class="atlas" id="content">
+    <div class="editorial">
+      <div id="story">
+        <section class="chapter introduction" data-stage="package" id="package">
+          <div class="eyebrow"><span class="live-dot"></span> AMD INSTINCT · CDNA 3 · gfx942</div>
+          <h1>Inside the<br><em>MI300X.</em></h1>
+          <p class="intro-deck">One GPU.<br>Eight compute dies.<br>Let's look inside.</p>
+          <p>Follow a kernel from the package to the lanes that execute it. A guided journey through AMD's chiplet accelerator, with the NVIDIA concepts you already know.</p>
+          <p><a href="../../../blogs/20_mi300x_gemm.html" target="_top">Read the full walkthrough and write a Gluon GEMM [WIP]</a></p>
+          <div class="hero-stats"><div><strong>304</strong><span>COMPUTE UNITS</span></div><div><strong>192 <small>GB</small></strong><span>HBM3 MEMORY</span></div><div><strong>8</strong><span>COMPUTE DIES</span></div></div>
+          <a class="descent-link" href="#read/xcd">Begin the descent <span aria-hidden="true">↓</span></a>
+          <div class="margin-note"><span>01 / PACKAGE</span><p>Drag the model to orbit. Select a component to inspect it.</p></div>
+        </section>
+
+        <section class="chapter" data-stage="xcd" id="xcd">
+          <div class="eyebrow">02 / ACCELERATOR COMPLEX DIE</div>
+          <h2>A GPU built<br>from smaller GPUs?</h2>
+          <p>Not quite. Each <strong>XCD</strong> is a compute chiplet with 38 active CUs and a shared 4 MB L2 cache. Eight XCDs make up MI300X's 304 active CUs.</p>
+          <p>In <strong>SPX mode</strong>, the package appears as one GPU device. We launch one grid; the application doesn't have to launch work separately on every chiplet.</p>
+          <div class="equation">8 XCDs × 38 CUs <span>= 304 active CUs</span></div>
+          <div class="nvidia-note"><span>NVIDIA CONNECTION</span><p>An XCD is a physical compute die. It isn't a direct equivalent of a Hopper GPC. H100's compute logic lives on a monolithic GH100 die.</p></div>
+          <button class="inline-action" data-open-stage="cu">Look inside one CU <span>↗</span></button>
+          <a class="source-link" href="https://rocm.docs.amd.com/en/latest/reference/gpu-arch/mi300.html" target="_blank" rel="noreferrer">AMD · MI300 microarchitecture ↗</a>
+        </section>
+
+        <section class="chapter" data-stage="cu" id="cu">
+          <div class="eyebrow">03 / COMPUTE UNIT</div>
+          <h2>Where a block<br>gets to work.</h2>
+          <p>A HIP block, also called a <strong>workgroup</strong>, executes on one CU. Its wavefronts share on-chip resources: registers, execution pipelines, and a 64 KiB scratchpad called LDS.</p>
+          <p>Scalar instructions handle values common to a wave. Vector instructions operate on per-lane values. Matrix instructions use dedicated matrix pipelines.</p>
+          <div class="resource-list"><div><span>SGPRs / SALU</span><p>Wave-uniform values and control</p></div><div><span>VGPRs / VALU</span><p>Per-lane values and arithmetic</p></div><div><span>LDS</span><p>64 KiB of software-managed scratchpad</p></div></div>
+          <div class="nvidia-note"><span>NVIDIA CONNECTION</span><p>The CU plays the role you associate with an SM. Resource counts and execution organization differ; a CU count is not an SM performance ratio.</p></div>
+          <a class="source-link" href="https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/conceptual/cdna/compute-unit.html" target="_blank" rel="noreferrer">AMD · Compute unit and pipelines ↗</a>
+        </section>
+
+        <section class="chapter" data-stage="wave" id="wave">
+          <div class="eyebrow">04 / WAVEFRONT</div>
+          <h2>Your warp<br>just got wider.</h2>
+          <p>NVIDIA groups threads into 32-thread warps. CDNA 3 uses <strong>64-thread wavefronts</strong>. A 256-thread block becomes four waves instead of eight warps.</p>
+          <p>The grid on the right is one wave, drawn as 8 × 8 for readability. Select a lane, or mask half the wave to see which lanes participate in a vector instruction.</p>
+          <div class="wave-controls"><label for="block-size">Threads per block<select id="block-size"><option>64</option><option>128</option><option selected>256</option><option>512</option></select></label><div class="counts"><strong id="amd-wave-total">4 waves</strong><span id="nvidia-warp-total">8 NVIDIA warps</span></div></div>
+          <div class="segmented" aria-label="Execution mask"><button class="active" data-mask="all" aria-pressed="true">All 64 lanes</button><button data-mask="first" aria-pressed="false">Lanes 0–31</button><button data-mask="second" aria-pressed="false">Lanes 32–63</button></div>
+          <p class="small-note" id="mask-description">All lanes are active. This is thread grouping, not a cycle timing model.</p>
+          <div class="nvidia-note"><span>A PORTING DETAIL</span><p>A full-wave shuffle reduction starts at offset 32 here. A hardcoded offset of 16 only combines 32 lane contributions into lane 0.</p></div>
+          <a class="source-link" href="https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_cpp_language_extensions.html#warpsize" target="_blank" rel="noreferrer">AMD · Wave size in HIP ↗</a>
+        </section>
+
+        <section class="chapter" data-stage="mfma" id="mfma">
+          <div class="eyebrow">05 / MATRIX INSTRUCTION</div>
+          <h2>64 lanes.<br>One matrix tile.</h2>
+          <p><strong>MFMA</strong> means Matrix Fused Multiply-Add. An instruction cooperatively computes <code>D = A × B + C</code>, with operands and accumulators distributed across the wave.</p>
+          <p>This example uses a 16 × 16 × 16 FP16 matrix operation with FP32 accumulation. Inspect a mathematical K slice, or switch to the instruction's actual lane-to-element mapping.</p>
+          <div class="segmented" aria-label="Matrix visualization"><button class="active" data-matrix-mode="math" aria-pressed="true">K slice</button><button data-matrix-mode="lane" aria-pressed="false">Lane ownership</button></div>
+          <div class="range-heading"><label for="k-slice">Inspect K slice</label><output id="k-value" for="k-slice">k = 0</output></div><input type="range" id="k-slice" min="0" max="15" value="0" />
+          <div id="lane-control" hidden><div class="range-heading"><label for="mfma-lane">Inspect wave lane</label><output id="lane-value" for="mfma-lane">lane 0</output></div><input type="range" id="mfma-lane" min="0" max="63" value="0" /><p class="small-note" id="lane-ownership">Lane 0: A[0, 0:4], B[0:4, 0], D[0:4, 0]. Ranges exclude the upper endpoint.</p></div>
+          <div class="code-note"><code>v_mfma_f32_16x16x16_f16</code><span>256 output values / 64 lanes = 4 FP32 values per lane</span></div>
+          <p class="small-note">The grids use mathematical coordinates. K slices illustrate dot products, not hardware cycles. Lane ownership uses the default instruction modifiers and AMD's <a href="https://github.com/ROCm/amd_matrix_instruction_calculator" target="_blank" rel="noreferrer">Matrix Instruction Calculator</a>.</p>
+          <a class="source-link" href="https://rocm.blogs.amd.com/software-tools-optimization/matrix-cores-cdna/README.html" target="_blank" rel="noreferrer">AMD · CDNA matrix core programming ↗</a>
+        </section>
+
+        <section class="chapter" data-stage="memory" id="memory">
+          <div class="eyebrow">06 / FEEDING THE COMPUTE</div>
+          <h2>The math is fast.<br>Keep it fed.</h2>
+          <p>The memory hierarchy brings a value from HBM through caches to registers. A tiled kernel can stage values in LDS so a workgroup reuses them.</p>
+          <p>MI300X has 256 MB of last-level Infinity Cache, 4 MB of L2 per XCD, a 32 KiB vector L1 per CU, and 64 KiB of LDS per CU. LDS is explicitly managed, rather than another automatic cache.</p>
+          <div class="tile-calculator"><span class="control-title">PLAN A SHARED TILE</span><div class="tile-inputs"><label>M<select id="tile-m"><option>64</option><option selected>128</option><option>256</option></select></label><label>N<select id="tile-n"><option>64</option><option selected>128</option><option>256</option></select></label><label>K<select id="tile-k"><option>16</option><option selected>32</option><option>64</option><option>128</option></select></label><label>Stages<select id="tile-stages"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label></div><div class="capacity-track"><div id="lds-fill"></div></div><div class="capacity-text"><strong id="lds-used">32 KiB / 64 KiB</strong><span id="lds-bound">At most 2 workgroups by LDS capacity</span></div><p class="small-note">FP16 A + B tiles: stages × (M×K + K×N) × 2 bytes. Excludes padding and other storage; this is an LDS capacity bound, not predicted occupancy.</p></div>
+          <button class="inline-action" id="start-trace">Follow one tile through memory <span>↗</span></button>
+          <a class="source-link" href="https://rocm.docs.amd.com/en/latest/reference/gpu-arch-specs.html" target="_blank" rel="noreferrer">AMD · Hardware resource specifications ↗</a>
+        </section>
+        <section class="end-note"><span class="eyebrow">KEEP EXPLORING</span><h2>Now connect<br>the pieces.</h2><p>Inspect individual components in Explore, or follow the memory operations of a tiled matmul in Trace.</p><button class="primary-button" data-mode="explore">Explore the architecture <span>↗</span></button><p class="credit">Built by Jino Rohit.</p></section>
+      </div>
+
+      <section id="explore-panel" class="mode-panel" hidden>
+        <div class="eyebrow">EXPLORE / CLICK TO INSPECT</div><h1 class="panel-heading">Every piece<br>has a job.</h1><p>Choose a level, then select a component in the model. Drag to orbit and scroll over the model to zoom.</p>
+        <div id="level-picker" class="level-picker" aria-label="Architecture level"></div>
+        <div id="component-detail" class="component-detail" aria-live="polite"><span class="detail-category">SELECTED COMPONENT</span><h2>MI300X package</h2><p>Eight compute dies and four I/O dies form one accelerator package.</p></div>
+        <div id="explore-controls"></div>
+        <button class="inline-action" id="share-view">Copy link to this view <span>↗</span></button><span id="share-status" class="small-note" role="status"></span>
+      </section>
+
+      <section id="trace-panel" class="mode-panel" hidden>
+        <div class="eyebrow">TRACE / A TILED MATMUL</div><h1 class="panel-heading">Follow<br>one tile.</h1><p>A conceptual sequence for loading an operand tile, staging it in LDS, and using it in matrix arithmetic.</p>
+        <div class="trace-transport"><button id="trace-play" class="primary-button">Play trace <span>▶</span></button><button id="trace-reset" class="text-button">Reset ↺</button></div>
+        <ol id="trace-steps" class="trace-steps"></ol>
+        <div class="trace-description" aria-live="polite"><span id="trace-tag" class="detail-category">STEP 01 / GLOBAL LOAD</span><h2 id="trace-title">Fetch from HBM</h2><p id="trace-description"></p><code id="trace-instruction"></code></div>
+        <p class="small-note">The particles illustrate data movement. They are not measured traffic, latency, cache hits, or exact physical routes. Cache policy and compiler-generated instructions can vary.</p>
+      </section>
+    </div>
+
+    <aside class="visual-column" aria-label="Interactive architecture model">
+      <div class="stage-shell">
+        <div class="stage-topline"><div class="breadcrumb" id="breadcrumb" aria-label="Model level"></div><span class="model-evidence">SCHEMATIC MODEL</span></div>
+        <div id="scene" tabindex="0" role="application" aria-label="3D MI300X model. Drag to rotate. Use the level buttons to navigate. Select visible components to inspect."><div class="renderer-status" id="renderer-status">Assembling the architecture<span></span></div><div id="fallback" hidden></div><div id="model-labels" aria-hidden="true"></div></div>
+        <div class="scene-title"><span id="scene-number">01</span><div><span id="scene-kicker">THE ACCELERATOR PACKAGE</span><h2 id="scene-title">Eight dies. One device.</h2></div></div>
+        <div class="model-toolbar"><span id="hover-label" role="status">Select a component to inspect</span><div><button id="explode" class="tool-button" aria-pressed="false" title="Separate the chiplet layers">Explode <span>↟</span></button><button id="reset-camera" class="tool-button" title="Reset model view">Reset <span>↺</span></button><button id="rotate" class="tool-button" aria-pressed="false" title="Toggle automatic rotation">Orbit <span>⟳</span></button></div></div>
+        <div class="legend"><span><i class="legend-compute"></i>Compute</span><span><i class="legend-memory"></i>Memory / registers</span><span><i class="legend-io"></i>Fabric / I/O</span><small>Geometry is illustrative, not a physical floorplan.</small></div>
+        <nav id="chapter-rail" class="chapter-rail" aria-label="Jump to architecture level"></nav>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="spec-tape"><span>AMD INSTINCT MI300X</span><span>CDNA 3 <b>gfx942</b></span><span>8 XCD <b>304 CU</b></span><span>HBM3 <b>192 GB</b></span><span>MEMORY BW <b>5.3 TB/s peak</b></span><button id="footer-sources">PUBLIC ARCHITECTURE REFERENCES ↗</button></footer>
+
+  <dialog id="sources-dialog"><div class="dialog-header"><span class="eyebrow">THE REFERENCE DESK</span><button class="icon-button" data-close aria-label="Close sources">×</button></div><h2>Built on public<br>architecture documents.</h2><p>The resource counts and instruction descriptions come from AMD's documentation. Placement, wires, particle animations, and elapsed time are schematic.</p><ol class="source-list"><li><a href="https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/white-papers/amd-cdna-3-white-paper.pdf" target="_blank" rel="noreferrer">CDNA 3 architecture white paper <span>↗</span></a><p>Chiplets, compute units, matrix cores, cache and memory architecture.</p></li><li><a href="https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-mi300-cdna3-instruction-set-architecture.pdf" target="_blank" rel="noreferrer">MI300 instruction-set reference <span>↗</span></a><p>Registers, execution masks, MFMA, memory and data-share instructions.</p></li><li><a href="https://rocm.docs.amd.com/en/latest/reference/gpu-arch-specs.html" target="_blank" rel="noreferrer">AMD GPU hardware specifications <span>↗</span></a><p>Active CUs, cache sizes, LDS, register files, wave size, compiler targets.</p></li><li><a href="https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/conceptual/cdna/compute-unit.html" target="_blank" rel="noreferrer">Compute unit performance model <span>↗</span></a><p>Execution pipelines, scheduling, local storage and profiling concepts. Covers multiple CDNA generations.</p></li><li><a href="https://rocm.docs.amd.com/projects/amdsmi/en/docs-7.14.0/conceptual/partition.html" target="_blank" rel="noreferrer">MI300X compute and memory partitioning <span>↗</span></a><p>SPX and CPX modes, and physical versus logical device boundaries.</p></li><li><a href="https://www.amd.com/en/products/accelerators/instinct/mi300/mi300x.html" target="_blank" rel="noreferrer">MI300X product specifications <span>↗</span></a><p>192 GB HBM3 and 5.3 TB/s advertised peak memory bandwidth.</p></li></ol><p class="small-note">Scope: MI300X / CDNA 3 / gfx942. Shared-resource sizes use KiB where applicable. Product memory and bandwidth follow AMD's advertised units. Independent educational project; not affiliated with AMD or NVIDIA.</p></dialog>
+
+  <dialog id="compare-dialog"><div class="dialog-header"><span class="eyebrow">A FAMILIAR POINT OF REFERENCE</span><button class="icon-button" data-close aria-label="Close comparison">×</button></div><h2>MI300X meets<br>H100 SXM.</h2><p>Match the concepts first. These capacities describe hardware resources; they are not application performance results.</p><div class="table-scroll"><table><thead><tr><th>Resource</th><th>MI300X</th><th>H100 SXM</th></tr></thead><tbody><tr><td>Architecture</td><td>CDNA 3</td><td>Hopper</td></tr><tr><td>Device target</td><td>gfx942</td><td>sm_90</td></tr><tr><td>Compute organization</td><td>8 XCDs, 304 CUs</td><td>GH100, 132 active SMs</td></tr><tr><td>Thread grouping</td><td>64-thread wave</td><td>32-thread warp</td></tr><tr><td>Block scratchpad</td><td>64 KiB LDS / CU</td><td>Up to 228 KiB / SM</td></tr><tr><td>Matrix instructions</td><td>MFMA</td><td>MMA / WGMMA</td></tr><tr><td>Device memory</td><td>192 GB HBM3</td><td>80 GB HBM3</td></tr><tr><td>Advertised memory BW</td><td>5.3 TB/s</td><td>3.35 TB/s</td></tr></tbody></table></div><p class="small-note">A CU and an SM have different execution and resource organizations. H100's maximum shared allocation per block is 227 KiB and large allocations require explicit opt-in.</p><p class="dialog-links"><a href="https://docs.nvidia.com/cuda/hopper-tuning-guide/" target="_blank" rel="noreferrer">Hopper tuning guide ↗</a><a href="https://www.nvidia.com/en-us/data-center/h100/" target="_blank" rel="noreferrer">H100 specifications ↗</a></p></dialog>
+
+  <dialog id="help-dialog"><div class="dialog-header"><span class="eyebrow">MAKE YOURSELF AT HOME</span><button class="icon-button" data-close aria-label="Close controls">×</button></div><h2>A few controls.</h2><dl class="shortcuts"><div><dt>Drag / touch</dt><dd>Orbit the model</dd></div><div><dt>Wheel / pinch</dt><dd>Zoom in Explore and Trace</dd></div><div><dt>Click a component</dt><dd>Inspect its role and resources</dd></div><div><dt>← / →</dt><dd>Previous / next level, or trace step</dd></div><div><dt>1–6</dt><dd>Jump to an architecture level</dd></div><div><dt>R</dt><dd>Reset the camera</dd></div><div><dt>Space</dt><dd>Play / pause in Trace</dd></div><div><dt>Escape</dt><dd>Close a panel</dd></div></dl><p class="small-note">In Read, scroll the page to descend. Reduced-motion preferences disable automatic orbit and animated transitions. All stages are also available through the level buttons.</p></dialog>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
