@@ -1,0 +1,15 @@
+Diagram rendering assets
+
+Virgil, the original Excalidraw handwriting font, by Ellinor Rapp.
+Source: https://github.com/excalidraw/virgil
+Revision: 3d4c829dc85b455d4646631ac52bc1517df04217
+Unmodified font: ../fonts/Virgil.woff2
+License: SIL Open Font License 1.1, in ../fonts/LICENSE.md.
+The standalone SVG diagrams embed this font and its license for independent use.
+
+Rough.js 4.6.6 by Preet Shihn.
+Source: https://github.com/rough-stuff/rough
+Bundle: https://cdn.jsdelivr.net/npm/roughjs@4.6.6/bundled/rough.js
+License: MIT, in ROUGH-LICENSE.txt.
+Used to render sketch strokes into the static SVG and PNG diagrams.
+The article does not load Rough.js at runtime.

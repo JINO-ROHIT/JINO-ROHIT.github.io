@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1000" viewBox="0 0 1400 1000" role="img" aria-labelledby="title description">
+  <title id="title">Memory layers inside AMD MI300X</title>
+  <desc id="description">A five-level pyramid. At the top, each compute unit has a 512 KiB vector register file and a 12.5 KiB scalar register file. The next band shows separate 64 KiB LDS shared memory and 32 KiB vector L1 cache per compute unit. L2 is 4 MiB per XCD, or 32 MiB total. Infinity Cache is 256 MiB across the device. HBM3 device memory is advertised as 192 GB with up to 5.3 TB/s peak bandwidth. Pyramid widths are illustrative and LDS is software-managed rather than an automatic cache level.</desc>
+  <defs>
+    <style>
+      text { font-family: Arial, Helvetica, sans-serif; fill: #292524; }
+      .title { font-family: Georgia, serif; font-size: 37px; font-weight: 700; }
+      .subtitle { font-size: 22px; fill: #6b625b; }
+      .layer { font-size: 28px; font-weight: 600; text-anchor: middle; }
+      .small-layer { font-size: 21px; font-weight: 600; text-anchor: middle; }
+      .material { font-size: 19px; text-anchor: middle; }
+      .scope { font-size: 23px; text-anchor: end; fill: #57534e; }
+      .capacity { font-size: 24px; }
+      .note { font-size: 19px; fill: #57534e; }
+      .guide { stroke: #a89c91; stroke-width: 1.5; fill: none; }
+      .edge { stroke: #53483d; stroke-width: 2.5; stroke-linejoin: round; }
+    </style>
+  </defs>
+  <rect width="1400" height="1000" fill="#fffaf3"/>
+  <text x="48" y="53" class="title">Memory layers inside MI300X</text>
+  <text x="49" y="91" class="subtitle">From a thread's working values to tensors stored in device memory.</text>
+
+  <!-- Widths are illustrative. LDS and L1 are separate resources, not a combined pool. -->
+  <path d="M560 120 L481.62 250 L638.38 250 Z" fill="#f58279" class="edge"/>
+  <path d="M481.62 250 L397.21 390 L560 390 L560 250 Z" fill="#ffd66b" class="edge"/>
+  <path d="M560 250 L638.38 250 L722.79 390 L560 390 Z" fill="#f8e5a6" class="edge"/>
+  <path d="M397.21 390 L309.78 535 L810.22 535 L722.79 390 Z" fill="#83d89a" class="edge"/>
+  <path d="M309.78 535 L222.35 680 L897.65 680 L810.22 535 Z" fill="#7fc6f2" class="edge"/>
+  <path d="M222.35 680 L120 850 L1000 850 L897.65 680 Z" fill="#b59af6" class="edge"/>
+
+  <text x="560" y="225" class="small-layer">Registers</text>
+  <text x="498" y="319" class="layer">LDS</text>
+  <text x="498" y="351" class="material">SRAM</text>
+  <text x="622" y="319" class="small-layer">Vector L1</text>
+  <text x="622" y="351" class="material">SRAM</text>
+  <text x="560" y="456" class="layer">L2 cache</text>
+  <text x="560" y="490" class="material">SRAM</text>
+  <text x="560" y="600" class="layer">Infinity Cache</text>
+  <text x="560" y="634" class="material">Last-level cache · SRAM</text>
+  <text x="560" y="754" class="layer">Device memory (HBM3)</text>
+  <text x="560" y="792" class="material">Vertically stacked DRAM</text>
+
+  <text x="140" y="211" class="scope">Per CU</text>
+  <path d="M160 204 H492" class="guide"/>
+  <text x="140" y="323" class="scope">Per CU</text>
+  <path d="M160 316 H430" class="guide"/>
+  <text x="140" y="463" class="scope">Per XCD</text>
+  <path d="M160 456 H347" class="guide"/>
+  <text x="140" y="607" class="scope">Device</text>
+  <path d="M160 600 H260" class="guide"/>
+  <text x="140" y="762" class="scope">Device</text>
+
+  <text x="1015" y="196" class="capacity">512 KiB vector register file</text>
+  <text x="1015" y="230" class="capacity">12.5 KiB scalar register file</text>
+  <text x="1015" y="263" class="note">Both per compute unit</text>
+
+  <text x="1015" y="319" class="capacity">64 KiB shared memory (LDS)</text>
+  <text x="1015" y="353" class="capacity">32 KiB vector L1 cache</text>
+  <text x="1015" y="383" class="note">Separate storage, both per CU</text>
+
+  <text x="1015" y="451" class="capacity">4 MiB per compute chiplet</text>
+  <text x="1015" y="485" class="capacity">32 MiB total across 8 XCDs</text>
+
+  <text x="1015" y="596" class="capacity">256 MiB total</text>
+  <text x="1015" y="630" class="note">Located on the I/O dies</text>
+
+  <text x="1015" y="740" class="capacity">192 GB HBM3</text>
+  <text x="1015" y="777" class="capacity">Up to 5.3 TB/s peak</text>
+  <text x="1015" y="811" class="note">Capacity and bandwidth for the device</text>
+
+  <path d="M48 883 H1352" stroke="#d6c9bb" stroke-width="1.5"/>
+  <text x="49" y="919" font-size="22" font-weight="600">LDS is managed by the kernel. L1, L2, and Infinity Cache cache data automatically.</text>
+  <text x="49" y="954" class="note">CU = compute unit. XCD = compute chiplet. Widths are illustrative, not proportional to capacity or latency.</text>
+  <text x="49" y="982" class="note">Scope: MI300X / CDNA 3 / full device. HBM capacity and bandwidth use AMD's advertised units.</text>
+</svg>

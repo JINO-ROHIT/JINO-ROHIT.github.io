@@ -1,0 +1,50 @@
+@font-face {
+  font-family: 'Virgil';
+  src: url('./fonts/Virgil.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+:root { --sketch-font: 'Virgil', 'Comic Sans MS', cursive; }
+.article-header h1, article h2, article h3 {
+  font-family: var(--sketch-font);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.article-header h1 { font-size: clamp(34px, 4.7vw, 48px); line-height: 1.25; }
+article h2 { font-size: 32px; line-height: 1.35; }
+article h3 { font-size: 25px; line-height: 1.4; }
+.eyebrow { font: 400 16px/1.55 var(--sketch-font); letter-spacing: 0; color: #9c3e25; }
+.atlas-figure, .package-image, .interactive {
+  border: 1.5px solid #827569;
+  border-radius: 5px 9px 4px 8px / 9px 4px 8px 5px;
+  background-color: #fffaf3;
+  box-shadow: 1px 1px 0 #82756933;
+}
+.figure-heading h2 { font-size: 26px; }
+.atlas-tabs button, .controls label, .controls select, .interactive .result,
+.interactive .small, .legend, figcaption, .hierarchy, .code-heading {
+  font-family: var(--sketch-font);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.atlas-tabs button { font-size: 15px; border: 1.5px solid #86766a; border-radius: 6px 3px 7px 4px / 4px 7px 3px 6px; }
+.atlas-tabs button[aria-pressed='true'] { background: #ffd8c4; color: #73331c; border-color: #9c3e25; }
+.controls label { font-size: 15px; line-height: 1.5; }
+.controls select { font-size: 16px; min-height: 44px; border: 1.5px solid #86766a; border-radius: 3px 6px 4px 7px / 6px 3px 7px 4px; background-color: #fffdf8; }
+.interactive .result { font-size: 17px; }
+.interactive .small, figcaption { font-size: 15px; }
+.legend { font-size: 14px; }
+.lane-grid > span { font-family: var(--sketch-font); font-size: 15px; border-radius: 3px 6px 2px 5px / 5px 2px 6px 3px; }
+.lane-grid > span:nth-child(3n) { border-radius: 6px 2px 5px 3px / 3px 5px 2px 6px; }
+.simd-row { font-family: var(--sketch-font); font-size: 13px; }
+.simd-row i { border-radius: 3px 5px 2px 4px / 4px 2px 5px 3px; }
+.code-heading { font-size: 15px; }
+@media (max-width: 580px) {
+  article h2 { font-size: 28px; }
+  article h3 { font-size: 23px; }
+  .eyebrow { font-size: 15px; }
+  .atlas-tabs button { font-size: 14px; }
+  figcaption { font-size: 14px; }
+  .lane-grid > span { font-size: 13px; }
+}
