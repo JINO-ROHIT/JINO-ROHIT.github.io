@@ -89,9 +89,4 @@ if (typeof document !== 'undefined') {
       document.querySelectorAll('[data-view]').forEach(tab => tab.setAttribute('aria-pressed', String(tab === button)));
     });
   });
-  const article = byId('article').cloneNode(true);
-  article.querySelectorAll('pre, nav, figure').forEach(element => element.remove());
-  const words = article.textContent.trim().split(/\s+/).length;
-  const codeLines = byId('gemm-source').textContent.split('\n').length;
-  byId('read-time').textContent = `${Math.ceil(words / 210 + codeLines / 25)} min read`;
 }
