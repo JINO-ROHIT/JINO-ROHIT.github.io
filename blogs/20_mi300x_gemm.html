@@ -185,7 +185,7 @@
         <h2>The Gluon GEMM</h2>
         <p>With this in mind, I think we are now at a good spot to start with some basic kernels. So let's finish this article with a simple GEMM implementation in Gluon, Triton's language for writing kernels with explicit layouts. We will implement <strong>C = A @ B</strong> with FP16 inputs, FP32 accumulation, and an FP16 output.</p>
 
-        <p>This first version uses 64 × 64 output tiles, steps through K in chunks of 32, and runs with four waves per workgroup. M and N must be multiples of 64 because the input loads only mask K. The <a href="./artifacts/mi300x/gemm.py" download>runnable example</a> includes the launcher and correctness checks. It needs a ROCm PyTorch and Triton environment with <a href="https://triton-lang.org/main/gluon/api/amd.cdna3.html">Gluon CDNA 3 support</a>.</p>
+        <p>This first version uses 64 × 64 output tiles, steps through K in chunks of 32, and runs with four waves per workgroup. M and N must be multiples of 64 because the input loads only mask K..</p>
 
         <pre class="full-code"><code id="gemm-source">
 from triton.experimental import gluon
