@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="A visual introduction to Gluon layouts: blocked layouts, linear bases, and swizzled and padded shared-memory layouts on AMD MI300X." />
+  <title>Layouts in Triton/Gluon</title>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-4VP1VKLPKJ"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag() { dataLayer.push(arguments); }
+    gtag('js', new Date());
+    gtag('config', 'G-4VP1VKLPKJ');
+  </script>
+  <link rel="stylesheet" href="./artifacts/mi300x/article.css" />
+  <link rel="stylesheet" href="./artifacts/gluon-layouts/article.css" />
+  <script type="module" src="./artifacts/gluon-layouts/article.mjs"></script>
+</head>
+<body>
+  <a class="skip-link" href="#article">Skip to article</a>
+  <div class="page">
+    <nav class="site-nav" aria-label="Main navigation">
+      <a class="identity" href="../index.html">Jino Rohit</a>
+      <div><a href="../index.html">Home</a><a href="./blog.html">Blogs</a><a href="../projects/projects.html">Projects</a></div>
+    </nav>
+    <header class="article-header">
+      <h1>Layouts in Triton/Gluon</h1>
+      <p class="byline"><time datetime="2026-11-16">November 21, 2026</time> · 30 min read</p>
+    </header>
+    <article id="article">
+      <p>In the previous blog, we explored the MI300x architecture in detail. Be sure to read up on it before starting this blog. Once you're familiar with the architecture, it makes sense to start with some simple kernels.
+        In my case, I prefer using a DSL like triton to write kernels. Writing kernels in triton is all about writing layouts.</p>
+      <p>In this blog, we'll explore different types of layouts and how they affect the way data is organized and accessed in GPU memory.</p>
+
+      <section id="ownership">
+        <h2>What exactly are layouts?</h2>
+        <p>I like to think of layouts as a way to describe how data is distributed across threads.</p>
+        <p>Let's say our program loads a vector of 512 values. The workgroup has 256 threads. Where do those 512 values go?</p>
+        <p>This is exactly what a  <strong>layout</strong> does. Given a wave, a lane in that wave, and a value slot within that lane, which tensor element does it own?</p>
+        <figure class="layout-sketch"><a href="./artifacts/gluon-layouts/01-ownership.svg" target="_blank" rel="noopener" aria-label="Open diagram: A layout tells us who owns each value"><img src="./artifacts/gluon-layouts/01-ownership.svg" width="1100" height="470" loading="lazy" decoding="async" alt="The first eight elements of a larger vector. With size_per_thread=[2], lane 0 owns x[0] and x[1], lane 1 owns x[2] and x[3], and so on. Only four lanes are shown." /></a></figure>
+        <p>In this example, lane 0 holds <code>x[0]</code> and <code>x[1]</code>, lane 1 holds <code>x[2]</code> and <code>x[3]</code>, and so on. When we write <code>y = x + 1</code>, each thread adds 1 to the values it holds.</p>
+
+        <h3>Wait, what about the memory layout?</h3>
+        <p>A tensor's strides tell us how to find an element in memory. For a row-major matrix with 32 columns, <code>x[row, col]</code> is at element offset <code>row * 32 + col</code> from its base pointer.</p>
+        <figure class="layout-sketch"><a href="./artifacts/gluon-layouts/02-memory-and-ownership.svg" target="_blank" rel="noopener" aria-label="Open diagram: The address and the owner answer different questions"><img src="./artifacts/gluon-layouts/02-memory-and-ownership.svg" width="1100" height="510" loading="lazy" decoding="async" alt="A four-by-four corner of a sixteen-by-thirty-two row-major tensor. Addresses use row stride 32. Ownership follows BlockedLayout([1,2],[8,8],[2,2],[1,0]). The logical tensor is unchanged." /></a></figure>
+        <p>The drawing on the left tells you <strong>which address to load</strong> while the right drawing poses <strong>which thread holds the result.</strong></p>
+
+      </section>
+
+
+      <section id="one-dimension">
+        <h2>Blocked layouts</h2>
+        <p>Let's start with the most fundamental layout, the <a href="https://triton-lang.org/main/gluon/api/generated/triton.experimental.gluon.language.BlockedLayout.html"><code>BlockedLayout</code></a>. Here is a layout for a vector of 256 values:</p>
+        <pre><code>from triton.experimental import gluon
+from triton.experimental.gluon import language as gl
+
+layout: gl.constexpr = gl.BlockedLayout(
+    size_per_thread=[1],
+    threads_per_warp=[64],
+    warps_per_cta=[4],
+    order=[0],
+)
+
+offsets = gl.arange(0, 256, layout=layout)</code></pre>
+
+          <h3>What do the four fields mean?</h3>
+        <div class="table-scroll"><table>
+          <thead><tr><th scope="col">Field</th><th scope="col">Meaning</th><th scope="col">Our vector</th></tr></thead>
+          <tbody>
+            <tr><th scope="row"><code>size_per_thread</code></th><td>how many elements does each thread own?</td><td>1 value</td></tr>
+            <tr><th scope="row"><code>threads_per_warp</code></th><td>how many threads are in each wave?</td><td>64 along the vector</td></tr>
+            <tr><th scope="row"><code>warps_per_cta</code></th><td>how many waves are in each block?</td><td>4 along the vector</td></tr>
+            <tr><th scope="row"><code>order</code></th><td>the major ordering</td><td>only dimension 0 exists</td></tr>
+          </tbody>
+        </table></div>
+
+        <p>Putting together what we know, this means one value per thread, 64 threads per wave, and four waves gives us <strong>1 × 64 × 4 = 256 values</strong>. This matches the vector's shape exactly.</p>
+        <figure class="layout-sketch"><a href="./artifacts/gluon-layouts/03-four-waves.svg" target="_blank" rel="noopener" aria-label="Open diagram: 256 values, 256 threads, one value each"><img src="./artifacts/gluon-layouts/03-four-waves.svg" width="1100" height="530" loading="lazy" decoding="async" alt="BlockedLayout([1],[64],[4],[0]) for a vector of shape [256]. Each wave owns 64 consecutive logical elements." /></a></figure>
+        <p>Wave 0 owns indices 0–63. Wave 1 owns 64–127, and so on.</p>
+
+        <h3>Give each thread two values</h3>
+        <p>Now change <code>size_per_thread</code> to <code>[2]</code> and use a vector of 512 values. The other fields stay the same.</p>
+        <pre><code>layout: gl.constexpr = gl.BlockedLayout(
+    size_per_thread=[2],
+    threads_per_warp=[64],
+    warps_per_cta=[4],
+    order=[0],
+)
+offsets = gl.arange(0, 512, layout=layout)</code></pre>
+        <figure class="layout-sketch"><a href="./artifacts/gluon-layouts/04-size-per-thread.svg" target="_blank" rel="noopener" aria-label="Open diagram: Two values per thread means two neighbors at a time"><img src="./artifacts/gluon-layouts/04-size-per-thread.svg" width="1100" height="500" loading="lazy" decoding="async" alt="The first eight vector positions. size_per_thread one assigns adjacent elements to different lanes; size_per_thread two assigns pairs to each lane. The full base tile grows from 256 to 512 values." /></a></figure>
+        <p>Lane 0 owns 0 and 1, lane 1 owns 2 and 3, and lane 63 owns 126 and 127. Wave 1 starts at 128. The first index for a thread is now <code>(wave * 64 + lane) * 2</code>, followed by its neighboring value.</p>
+        <p>We still have 256 threads. Each thread now holds two logical values in this tensor. A larger per thread tile can make it possible to issue wider memory operations, but alignment, strides, datatype, and the compiler's choices still matter.</p>
+
+        <h3>What if our tensor is larger than this pattern?</h3>
+        <p>Okay, so far we have only been thinking about the ideal scenario. We haven't considered what happens when the tensor is larger than the base pattern.</p>
+        <p>Let's go back to <code>size_per_thread=[1]</code>, 64 lanes per wave, and four waves. That gives us <strong>256 threads</strong>. If our vector has 256 elements, each thread holds one: thread 0 gets <code>x[0]</code>, thread 1 gets <code>x[1]</code>, all the way up to thread 255 getting <code>x[255]</code>.</p>
+        <p>Now keep the same layout and make the vector longer - </p>
+        <pre><code>layout: gl.constexpr = gl.BlockedLayout([1], [64], [4], [0])
+offsets = gl.arange(0, 1024, layout=layout)</code></pre>
+        <p>We have <strong>1,024 positions to distribute across those same 256 threads</strong>. Guess what happens here? Yes! The pattern repeats after every block, basically after every 256 elements.Split the vector into four chunks of 256.</p>
+        <figure class="layout-sketch"><a href="./artifacts/gluon-layouts/05-repeat.svg" target="_blank" rel="noopener" aria-label="Open diagram: 256 threads share 1,024 values"><img src="./artifacts/gluon-layouts/05-repeat.svg" width="1100" height="865" loading="lazy" decoding="async" alt="One 1024-element vector is drawn as four consecutive 256-element chunks. Each column follows the same thread through all four chunks. Thread 0, wave 0 lane 0, owns x[0], x[256], x[512], and x[768]. Thread 1 owns x[1], x[257], x[513], and x[769]. Thread 255, wave 3 lane 63, owns x[255], x[511], x[767], and x[1023]." /></a></figure>
+        <p>Read down the blue column. <strong>Thread 0 is wave 0, lane 0.</strong> It gets the first value from each chunk: <code>x[0]</code>, <code>x[256]</code>, <code>x[512]</code>, and <code>x[768]</code>. Thread 1 gets the next value in each chunk: <code>x[1]</code>, <code>x[257]</code>, <code>x[513]</code>, and <code>x[769]</code>.</p>
+        <p>Every thread now holds four values. The same assignment repeats at offsets 0, 256, 512, and 768.</p>
+      </section>
+
+      <section id="two-dimensions">
+        <h2>Extend this idea to a matrix</h2>
+        <p>Now let's look at a tensor of shape <code>[16, 32]</code>. We will use this layout something like this -</p>
+        <pre><code>parent: gl.constexpr = gl.BlockedLayout(
+    size_per_thread=[1, 2],
+    threads_per_warp=[8, 8],
+    warps_per_cta=[2, 2],
+    order=[1, 0],
+)</code></pre>
+        <p>Each pair now refers to <code>[rows, columns]</code>. So <code>[1, 2]</code> means one row and two columns per thread. The 64 lanes in a wave are arranged as an 8 × 8 grid of these patches. Then four waves are arranged as a 2 × 2 grid of wave tiles.</p>
+        <figure class="layout-sketch"><a href="./artifacts/gluon-layouts/06-build-a-tile.svg" target="_blank" rel="noopener" aria-label="Open diagram: Build a tile from the inside out"><img src="./artifacts/gluon-layouts/06-build-a-tile.svg" width="1100" height="640" loading="lazy" decoding="async" alt="A lane owns one by two values. Sixty-four lanes arranged eight by eight form an eight-by-sixteen wave tile. Four waves arranged two by two form a sixteen-by-thirty-two workgroup tile." /></a></figure>
+
+        <figure class="layout-sketch layout-build">
+          <div id="layout-build-controls" class="build-controls" role="group" aria-label="Build the layout one level at a time" hidden>
+            <button type="button" data-build-step="0" aria-pressed="false">1. One thread</button>
+            <button type="button" data-build-step="1" aria-pressed="false">2. One wave</button>
+            <button type="button" data-build-step="2" aria-pressed="true">3. Four waves</button>
+            <button type="button" id="layout-build-play" aria-pressed="false">Play steps</button>
+          </div>
+          <a id="layout-build-link" href="./artifacts/gluon-layouts/07-wave-tiles.svg" target="_blank" rel="noopener" aria-label="Open the current layout diagram at full size"><img id="layout-build-image" src="./artifacts/gluon-layouts/07-wave-tiles.svg" width="1100" height="880" loading="lazy" decoding="async" alt="Four waves form a two-by-two grid of wave tiles. Each wave covers eight rows and sixteen columns of values. Every outlined pair is one lane's two values. Together they cover a sixteen-by-thirty-two base tile." /></a>
+          <figcaption id="layout-build-status" aria-live="polite">Four waves, arranged 2 × 2, cover a 16 × 32 tile. Each outlined pair belongs to one lane.</figcaption>
+        </figure>
+
+        <h3>What is <code>order=[1, 0]</code> doing?</h3>
+        <p><code>[1, 0]</code> is the good ol' row-major ordering. In the 8 × 8 lane grid, lane 0 is followed by lane 1 to its right. After eight lane patches, we move to the next row of patches.</p>
+        <figure class="layout-sketch"><a href="./artifacts/gluon-layouts/08-order.svg" target="_blank" rel="noopener" aria-label="Open diagram: Which dimension gets the next lane?"><img src="./artifacts/gluon-layouts/08-order.svg" width="1100" height="525" loading="lazy" decoding="async" alt="A four-by-four corner of an eight-by-eight lane grid. With order one zero, lane IDs advance along columns. With order zero one, they advance along rows. Each lane still owns one by two values." /></a></figure>
+
+        <div id="memory">
+        <h3>Why do we need to pay attention to the layouts?</h3>
+        <p>Let's consider a simple copy kernel where one workgroup copies a contiguous, row-major <strong>64 × 64 tile of FP32 values</strong>. We use four waves of 64 lanes. The element offset is always <code>row * 64 + col</code> where each value occupies 4 bytes.</p>
+<pre><code>@gluon.jit
+def copy_tile(src, dst, layout: gl.constexpr):
+    rows = gl.arange(0, 64, layout=gl.SliceLayout(1, layout))
+    cols = gl.arange(0, 64, layout=gl.SliceLayout(0, layout))
+    offsets = rows[:, None] * 64 + cols[None, :]
+    gl.store(dst + offsets, gl.load(src + offsets))</code></pre>
+
+        <p>Now let's compile the same kernel but using two diffent layouts -</p>
+        <pre><code>coalesced = gl.BlockedLayout(
+    size_per_thread=[1, 1],
+    threads_per_warp=[1, 64],
+    warps_per_cta=[4, 1],
+    order=[1, 0],
+)
+uncoalesced = gl.BlockedLayout(
+    size_per_thread=[1, 1],
+    threads_per_warp=[64, 1],
+    warps_per_cta=[1, 4],
+    order=[0, 1],
+)</code></pre>
+        <p>Although the layouts look quite similar, they have completely different ways of mapping the data. In the first layout, lanes run across columns and the four waves start on different rows. In the second, lanes run down rows and the waves start on different columns.</p>
+        <p>Let's focus on wave 0's first load - </p>
+        <ul>
+          <li>Across columns (contiguous) -  lane 0 loads <code>src[0,0]</code>, lane 1 loads <code>src[0,1]</code>, and so on. Their byte offsets are 0, 4, 8, …, 252.</li>
+          <li>Down rows (non contiguous) -  lane 0 loads <code>src[0,0]</code>, lane 1 loads <code>src[1,0]</code>, and so on. Their byte offsets are 0, 256, 512, …, 16,128.</li>
+        </ul>
+        <figure class="layout-sketch"><a href="./artifacts/gluon-layouts/33-memory-lane-addresses.svg" target="_blank" rel="noopener" aria-label="Open diagram: Which addresses do the lanes ask for?"><img src="./artifacts/gluon-layouts/33-memory-lane-addresses.svg" width="1100" height="820" loading="lazy" decoding="async" alt="Wave zero's first load from a 64 by 64 FP32 tile. An eight by eight corner highlights the first eight lanes across row zero for the coalesced layout and down column zero for the uncoalesced layout. The lane address examples show 4-byte steps across columns and 256-byte steps down rows, reaching offsets 252 and 16128 for lane 63." /></a></figure>
+
+        <p>Do you see the problem now? Take a look at the assembly generated for the two layouts for the same kernel for the first load.</p>
+        <pre><code class="language-asm">Coalesced layout
+global_load_dword v13, v0, s[2:3]
+global_store_dword v0, v13, s[4:5]
+
+Uncoalesced layout
+global_load_dword v1, v0, s[2:3]
+global_store_dword v0, v1, s[4:5]</code></pre>
+        <p>Both layouts use the same load and store instructions. To see the difference, look at the instructions that calculate <strong><code>v0</code> before the load</strong>.</p>
+        <p>In the <strong>coalesced layout</strong>, the lane is multiplied by 4 to get the next byte offset.</p>
+        <pre><code class="language-asm">v_and_or_b32 v0, v0, 63, s0     ; v0 = lane ID in wave 0
+v_lshlrev_b32_e32 v0, 2, v0     ; v0 = lane ID × 4</code></pre>
+        <p>In the <strong>uncoalesced layout</strong>, there is an extra left shift by 6, which multiplies by 64.</p>
+        <pre><code class="language-asm">v_lshlrev_b32_e32 v0, 6, v0     ; multiply by 64
+v_lshlrev_b32_e32 v0, 2, v0     ; multiply by 4 again</code></pre>
+        <p>So the first load sees these byte offsets in <code>v0</code>:</p>
+        <div class="table-scroll"><table>
+          <thead><tr><th scope="col">Lane</th><th scope="col">Coalesced byte offset</th><th scope="col">Uncoalesced byte offset</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">0</th><td>0</td><td>0</td></tr>
+            <tr><th scope="row">1</th><td>4</td><td>256</td></tr>
+            <tr><th scope="row">2</th><td>8</td><td>512</td></tr>
+            <tr><th scope="row">3</th><td>12</td><td>768</td></tr>
+          </tbody>
+        </table></div>
+        <p>The offsets 0, 4, 8, and 12 all fit inside the same block and the GPU can group those requests, but for the uncoalesced layout, the offsets 0, 256, 512, and 768 lie in four different blocks and they need separate block accesses.</p>
+</div>
+
+      </section>
+
+
+      <section id="linear-layout">
+        <h2>Linear layouts</h2>
+        <p>With <code>BlockedLayout</code>, we usually describe a pattern of how many values each thread owns, how the lanes are arranged, and how the waves fit together.</p>
+        <p>A <a href="https://triton-lang.org/main/gluon/api/generated/triton.experimental.gluon.language.DistributedLinearLayout.html"><code>DistributedLinearLayout</code></a> gives us another way to describe that ownership. We write down what each bit of the slot, lane, and wave IDs contributes to the tensor coordinate. These contributions are called <strong>basis entries</strong>. Selecting and combining them gives us the coordinate of a value held by a thread.</p>
+
+        <h3>First, make the IDs concrete</h3>
+        <p>Take a vector of <strong>512 values</strong>, with four waves, 64 lanes per wave, and two consecutive values per thread. Within each thread, we label its two values slot 0 and slot 1. Here, a slot identifies one of a thread's values.</p>
+        <p>Each ID needs enough bits to represent its possible values. Slot IDs are 0 or 1, so they need one bit. Lane IDs run from 0 to 63, so they need six bits. Wave IDs run from 0 to 3, so they need two bits.</p>
+        <p>Here are example IDs from those ranges, written in decimal and binary:</p>
+        <div class="table-scroll"><table>
+          <thead><tr><th scope="col">Input</th><th scope="col">Decimal value</th><th scope="col">Full binary representation</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Slot ID: 1 bit</th><td>1</td><td><code>1</code></td></tr>
+            <tr><th scope="row">Lane ID: 6 bits</th><td>5</td><td><code>000101</code></td></tr>
+            <tr><th scope="row">Wave ID: 2 bits</th><td>2</td><td><code>10</code></td></tr>
+          </tbody>
+        </table></div>
+        <p>For example, here is lane 5 with every bit shown:</p>
+        <pre class="binary-calculation" aria-label="All six lane bits and their place values"><samp>bit position   b5 b4 b3 b2 b1 b0
+place value    32 16  8  4  2  1
+lane 5          0  0  0  1  0  1
+
+5 = 0*32 + 0*16 + 0*8 + 1*4 + 0*2 + 1*1</samp></pre>
+        <p>So lane 5 has a 1 in positions <strong>b2 and b0.</strong></p>
+
+        <h3>Derive the bases from our blocked layout</h3>
+        <p>Now let's find out what those bits contribute to a tensor index. Here is our 512-value assignment written with <code>BlockedLayout</code>:</p>
+        <pre><code>blocked: gl.constexpr = gl.BlockedLayout(
+    size_per_thread=[2],
+    threads_per_warp=[64],
+    warps_per_cta=[4],
+    order=[0],
+)</code></pre>
+        <p>There is only one tensor dimension, so <code>order=[0]</code> just names that dimension. Within wave 0, lane 0 holds <code>x[0]</code> and <code>x[1]</code>, lane 1 holds <code>x[2]</code> and <code>x[3]</code>, and lane 2 holds <code>x[4]</code> and <code>x[5]</code>. Each wave covers <code>64 * 2 = 128</code> values. Wave 1 therefore starts at <code>x[128]</code>, wave 2 at <code>x[256]</code>, and wave 3 at <code>x[384]</code>.</p>
+        <p>For this assignment, we can calculate the index held by a wave, lane, and slot using:</p>
+        <pre class="binary-calculation" aria-label="Index formula for this blocked assignment"><samp>index = wave_id * 128 + lane_id * 2 + slot_id
+
+wave 0, lane 0, slot 0:   0*128 + 0*2 + 0 =   0
+wave 0, lane 0, slot 1:   0*128 + 0*2 + 1 =   1
+wave 0, lane 1, slot 0:   0*128 + 1*2 + 0 =   2
+wave 1, lane 0, slot 0:   1*128 + 0*2 + 0 = 128</samp></pre>
+        <p>A linear layout describes this same ownership by recording what happens for each <strong>single set input bit</strong>. To construct its lists, set all IDs to 0, then try one input ID at a time with the values 1, 2, 4, 8, and so on. Each of those numbers has exactly one bit set.</p>
+        <div class="table-scroll"><table>
+          <thead><tr><th scope="col">Input varied; other IDs stay 0</th><th scope="col">Try these IDs, each with one bit set</th><th scope="col">Indices from the formula</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Slot</th><td><code>1</code></td><td><code>1</code></td></tr>
+            <tr><th scope="row">Lane</th><td><code>1, 2, 4, 8, 16, 32</code></td><td><code>2, 4, 8, 16, 32, 64</code></td></tr>
+            <tr><th scope="row">Wave</th><td><code>1, 2</code></td><td><code>128, 256</code></td></tr>
+          </tbody>
+        </table></div>
+        <p>Those resulting indices are our <strong>basis entries</strong>: the contribution of each input bit when it alone is 1. For an ID with several 1 bits, we select the corresponding entries and combine them with XOR.</p>
+        <p>Now we can write the equivalent <a href="https://triton-lang.org/main/gluon/api/generated/triton.experimental.gluon.language.DistributedLinearLayout.html">linear layout</a>:</p>
+        <pre><code>linear: gl.constexpr = gl.DistributedLinearLayout(
+    reg_bases=[[1]],
+    lane_bases=[[2], [4], [8], [16], [32], [64]],
+    warp_bases=[[128], [256]],
+    block_bases=[],
+    shape=[512],
+)</code></pre>
+
+        <p>We've now described the same 512-value assignment using explicit bases. We'll explore more of what linear layouts can do in a future post. Next, let's look at how layouts arrange values in shared memory.</p>
+      </section>
+
+      <section id="swizzled-layout">
+        <h2>Shared memory layouts</h2>
+        <p>So far, we've talked about which threads hold values. Now we need to describe a tile placed in shared memory. This is a special case because of a phenomenon called <strong>bank conflicts</strong>.</p>
+        <h3>What are bank conflicts?</h3>
+        <p>Think of LDS as several banks that can serve requests in parallel. MI300X has <strong>32 banks, each 4 bytes wide</strong>. Consecutive 4-byte words go to consecutive banks -  word 0 goes to bank 0, word 1 to bank 1, and so on. After word 31, we wrap back around where word 32 goes to bank 0 again. This is the bank mapping - <code>bank = (byte_address // 4) % 32</code>.</p>
+        <figure class="layout-sketch"><a href="./artifacts/cute_dsl_matmul/smem.png" target="_blank" rel="noopener" aria-label="Open diagram: Consecutive words are distributed across 32 shared-memory banks"><img src="./artifacts/cute_dsl_matmul/smem.png" width="726" height="525" loading="lazy" decoding="async" alt="Bank 0 contains 32-bit words 0, 32, 64, and 96. Bank 1 contains words 1, 33, 65, and 97. Bank 2 contains words 2, 34, 66, and 98. This repeats through bank 31, containing words 31, 63, 95, and 127." /></a></figure>
+        <p>Now suppose thread 0 reads word 0 while thread 1 reads word 64. They want different words, but <code>0 % 32 = 0</code> and <code>64 % 32 = 0</code>, so both requests go to <strong>bank 0</strong>. When serviced in the same access phase, they compete for that bank and need separate service. That's the two-way bank conflict shown below. Reading word 0 and word 1 instead would use two different banks.</p>
+        <figure class="layout-sketch"><a href="./artifacts/cute_dsl_matmul/bank_conflict.png" target="_blank" rel="noopener" aria-label="Open diagram: Two threads request different words in bank zero"><img src="./artifacts/cute_dsl_matmul/bank_conflict.png" width="920" height="626" loading="lazy" decoding="async" alt="Thread 0 requests word 0 and thread 1 requests word 64. Both words sit in bank 0 at different addresses. The diagram labels this a two-way bank conflict." /></a></figure>
+        <p>This should motivate you enough for the need for a layout which is able to handle conflicts like these</p>
+        <h3>Swizzled shared layout</h3>
+        <p><strong>Swizzling means storing the same tensor values in a rearranged order in shared memory.</strong> For example, a group of values that would normally occupy positions 0–7 in a row might be placed in positions 8–15. This changes which banks those values use but keep in mind, the logical value for the element never changes.</p>
+        <p>Here's an example for a <a href="https://triton-lang.org/main/gluon/api/generated/triton.experimental.gluon.language.SwizzledSharedLayout.html"><code>SwizzledSharedLayout</code></a>.</p>
+        <pre><code>shared_a: gl.constexpr = gl.SwizzledSharedLayout(
+    vec=1, per_phase=1, max_phase=1, order=[1, 0],
+)
+shared_b: gl.constexpr = gl.SwizzledSharedLayout(
+    vec=1, per_phase=1, max_phase=1, order=[0, 1],
+)</code></pre>
+        <h4><code>vec</code> denotes how many consecutive elements move together</h4>
+        <p><code>vec=1</code> treats each element as its own group. With <code>vec=8</code>, each group contains eight consecutive elements along the fast dimension. In A, group 0 contains K indices 0–7, group 1 contains 8–15, and so on. Swizzling changes a group's position while keeping its eight elements together and in order.</p>
+
+        <h4><code>per_phase</code> denotes how many rows share the same rearrangement</h4>
+        <p> With <code>per_phase=2</code>, rows 0 and 1 use one pattern, rows 2 and 3 use the next, and so on. </p>
+
+        <h4><code>max_phase</code> denotes how many patterns do we cycle through</h4>
+        <p>For example <code>max_phase=8</code> gives phase numbers 0 through 7, then repeats from 0. For A with <code>per_phase=2</code> and <code>max_phase=8</code>-</p>
+        <pre class="binary-calculation" aria-label="Pairs of A rows share one swizzle phase, repeating after sixteen rows"><samp>A rows       0–1   2–3   4–5   6–7   8–9  10–11  12–13  14–15  16–17
+phase          0     1     2     3     4      5      6      7      0</samp></pre>
+
+
+        <p>Let's use groups of eight, two positions per phase, and eight phases:</p>
+        <pre><code>shared_a: gl.constexpr = gl.SwizzledSharedLayout(
+    vec=8, per_phase=2, max_phase=8, order=[1, 0],
+)
+shared_b: gl.constexpr = gl.SwizzledSharedLayout(
+    vec=8, per_phase=2, max_phase=8, order=[0, 1],
+)</code></pre>
+        <p>Let's look at <strong>row 2 of A</strong>, and only its first 16 values. With <code>vec=8</code>, we keep these values in two groups:</p>
+        <ul>
+          <li>The first group contains <code>A[2,0]</code> through <code>A[2,7]</code>.</li>
+          <li>The second contains <code>A[2,8]</code> through <code>A[2,15]</code>.</li>
+        </ul>
+        <p><code>per_phase=2</code> means two rows share each phase: rows 0 and 1 use phase 0; rows 2 and 3 use phase 1. Both <code>2 // 2</code> and <code>3 // 2</code> give 1. So <strong>rows 2 and 3 get the same arrangement</strong>.</p>
+        <p><code>SwizzledSharedLayout</code> defines the rule <strong><code>new_group_position = group_number XOR phase</code></strong>. This XOR rule is what shuffles the groups. If you number the two groups 0 and 1. At phase 1:</p>
+        <ul>
+          <li>Group 0 goes to group position <code>0 XOR 1 = 1</code>.</li>
+          <li>Group 1 goes to group position <code>1 XOR 1 = 0</code>.</li>
+        </ul>
+        <p>Voila! This is why the two groups swap places but keeping the 8 vector group together.</p>
+        <figure class="layout-sketch"><a href="./artifacts/gluon-layouts/30-swizzle-walkthrough.svg" target="_blank" rel="noopener" aria-label="Open diagram: Two groups exchange storage positions in row 2"><img src="./artifacts/gluon-layouts/30-swizzle-walkthrough.svg" width="1100" height="720" loading="lazy" decoding="async" alt="The first sixteen storage positions of row 2, before and after swapping two eight-value groups. Labels a0 through a15 identify the original A values. Highlighted a3, meaning A[2,3], moves from storage position 3 to position 11, keeping its place within its group." /></a></figure>
+        <p>Follow the highlighted <code>A[2,3]</code>. It has position 3 inside its group (the fourth value). Before the swap, its group starts at storage position 0, so it sits at <code>0 + 3 = 3</code>. After the swap, the group starts at position 8, so it sits at <strong><code>8 + 3 = 11</code></strong>.</p>
+        <p>The value is still <code>A[2,3]</code>. Position 11 is where we store it <strong>inside this LDS row</strong>. A load using the same shared layout knows to retrieve it from there.</p>
+        <p>This shift moves them to different banks ultimately helping us avoid bank conflicts.</p>
+
+</section>
+
+      <section id="padded-layout">
+        <h2>Padded layout</h2>
+        <p>Another layout that helps you avoid bank conflicts by adding padding in between the elements is called the <code>PaddedSharedLayout</code>.</p>
+        <p>Consider a 256 × 64 tile of A with this shared-memory layout -</p>
+        <pre><code>shared_a: gl.constexpr = gl.PaddedSharedLayout(
+    interval_padding_pairs=[[512, 16]],
+    offset_bases=[
+        [0, 1], [0, 2], [0, 4], [0, 8], [0, 16], [0, 32],
+        [16, 0], [32, 0], [64, 0],
+        [1, 0], [2, 0], [4, 0], [8, 0], [128, 0],
+    ],
+    cga_layout=[],
+    shape=[256, 64],
+)</code></pre>
+
+        <h3>What does <code>[[512,16]]</code> mean?</h3>
+        <p>After every 512 element positions, insert 16 padding elements.</p>
+        <p>Imagine lining up all the data values before inserting any gaps. Our tile has <code>256 * 64 = 16,384</code> values, so it has <strong>16,384 data slots, numbered 0 through 16,383</strong>. Let's call them slot number <strong>q</strong>. It's just a way to reference the data position not a matrix row number or a byte address.</p>
+        <figure class="layout-sketch"><a href="./artifacts/gluon-layouts/21-padded-shared.svg" target="_blank" rel="noopener" aria-label="Open diagram: Padding inserts gaps between data intervals"><img src="./artifacts/gluon-layouts/21-padded-shared.svg" width="1100" height="590" loading="lazy" decoding="async" alt="The exact padding pair five hundred twelve sixteen inserts sixteen elements after every five hundred twelve unpadded element positions. The physical offset is q plus sixteen times floor q over five hundred twelve. This is measured in elements." /></a></figure>
+        <p>If an element's storage offset is <code>q</code>, its physical element offset after padding 16 elements is now<code>q + 16 * (q // 512)</code>. Offset 511 stays 511. Offset 512 becomes 528 because it skips the first 16-element gap. Offset 1,024 becomes 1,056 because it skips two gaps.</p>
+        <p>Padding seems like a very easy way to change the bank alignment but it comes at a cost of using extra LDS capacity. This is usually a tradeoff you need to make.</p>
+
+        <h3>What are those offset bases?</h3>
+        <p>We represent the slots by combining entries. Each entry corresponds to one bit of the slot number q.</p>
+        <p>Our list has <strong>14 entries</strong>. Each can be selected or skipped, giving <strong>2¹⁴ = 16,384 combinations: one for every data slot</strong>. A 1 bit selects its entry; a 0 bit skips it. Entry 0 belongs to bit b0, entry 1 to b1, and so on.</p>
+        <p>Each selected entry contributes a <code>[row, column]</code> pair. Start at <code>[0,0]</code> and combine the selected entries using XOR, separately for the row and column. For example:</p>
+        <div class="table-scroll"><table>
+          <thead><tr><th scope="col">Slot q</th><th scope="col">Entries selected</th><th scope="col">Result</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">0</th><td>None</td><td><code>A[0,0]</code></td></tr>
+            <tr><th scope="row">1</th><td><code>[0,1]</code></td><td><code>A[0,1]</code></td></tr>
+            <tr><th scope="row">3 = 2 + 1</th><td><code>[0,2]</code>, <code>[0,1]</code></td><td><code>A[0,3]</code></td></tr>
+            <tr><th scope="row">65 = 64 + 1</th><td><code>[16,0]</code>, <code>[0,1]</code></td><td><code>A[16,1]</code></td></tr>
+          </tbody>
+        </table></div>
+        <figure class="layout-sketch"><a href="./artifacts/gluon-layouts/31-padded-first-slots.svg" target="_blank" rel="noopener" aria-label="Open diagram: Follow slots zero, one, and sixty-five into A"><img src="./artifacts/gluon-layouts/31-padded-first-slots.svg" width="1100" height="1110" loading="lazy" decoding="async" alt="All fourteen bits are shown for slots 0, 1, and 65 in three panels. Slot 0 selects nothing and gives A[0,0]. Slot 1 selects entry 0, [0,1], giving A[0,1]. Slot 65 highlights b6 and b0, with arrows to entry 6, [16,0], and entry 0, [0,1]. XOR combines them into [16,1], giving A[16,1]." /></a></figure>
+
+        <h4>Do all the 14 offset bases cover the whole matrix?</h4>
+        <ul>
+          <li>Yes! the six column entries combine to produce every column from <strong>0–63</strong>.</li>
+          <li>and the eight row entries combine to produce every row from <strong>0–255</strong>.</li>
+        </ul>
+        <p>Together, that gives <strong>64 columns × 256 rows = 16,384 coordinates</strong>.</p>
+<figure class="layout-sketch"><a href="./artifacts/gluon-layouts/32-padded-first-row.svg" target="_blank" rel="noopener" aria-label="Open diagram: Six bits cover all sixty-four columns of row zero"><img src="./artifacts/gluon-layouts/32-padded-first-row.svg" width="1100" height="810" loading="lazy" decoding="async" alt="The low six bits select bases with row contribution zero and column contributions 32, 16, 8, 4, 2, and 1. Slot three selects [0,2] and [0,1], giving A[0,3]. Slot sixty-three selects all six entries, giving column 63. A row strip aligns data slots zero through sixty-three with A[0,0] through A[0,63]. The upper eight bits stay zero throughout." /></a></figure>
+ </section>
+
+      <p>That is a good place to stop for this blog. We've covered the main layouts you would usually come across in triton kernels and their usage.. It's okay if you still need to draw a few boxes and work through the bits by hand. This indeed is a complex topic and took me a while to internalize it.</p>
+      <p>From the next few blogs, we'll get more hands-on and start using these layouts in kernels.</p>
+
+    </article>
+  </div>
+</body>
+</html>

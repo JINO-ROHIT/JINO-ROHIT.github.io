@@ -1,0 +1,31 @@
+/* Keep handwriting inside the figures; prose and controls use the site's fonts. */
+@font-face { font-family: LayoutVirgil; src: url('../mi300x/fonts/Virgil.woff2') format('woff2'); font-display: swap; }
+.layout-sketch { margin-top: 30px; margin-bottom: 32px; }
+.layout-sketch a { display: block; }
+.layout-sketch img { width: 100%; height: auto; display: block; }
+.layout-sketch figcaption { padding: 11px 0 0; }
+.build-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.build-controls[hidden] { display: none; }
+.build-controls button:last-child { margin-left: auto; }
+.layout-build > a { overflow: hidden; }
+.layout-build figcaption { min-height: 3.3em; }
+.contents a { text-decoration: none; }
+.contents a:hover { text-decoration: underline; }
+.layout-explorer .controls { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.layout-explorer input[type=range] { width: 100%; accent-color: var(--accent); min-height: 40px; margin: 0; }
+.layout-explorer input:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
+.layout-explorer svg { width: 100%; height: auto; display: block; }
+.layout-explorer svg text { font-family: LayoutVirgil, cursive; fill: #332c26; }
+.layout-explorer svg .owned { stroke: #9a3412; stroke-width: 2.5; }
+.layout-explorer .result { min-height: 3.4em; }
+.layout-explorer figcaption { padding-left: 0; padding-right: 0; }
+.source-links { font: 14px/1.8 system-ui, sans-serif; }
+.binary-calculation { line-height: 1.85; }
+.binary-calculation samp { font: inherit; }
+@media (max-width: 580px) {
+  .build-controls { display: grid; grid-template-columns: 1fr 1fr; }
+  .build-controls button:last-child { margin-left: 0; }
+  .layout-explorer .controls { grid-template-columns: 1fr; }
+  .layout-explorer .lane-control { grid-column: 1 / -1; }
+}
+@media print { .layout-sketch { break-inside: avoid; } }

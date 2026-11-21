@@ -1,0 +1,579 @@
+{
+  "scope": "Layout definitions from amd/gemm; all MFMA examples use version 3.",
+  "layout_classes": [
+    "AMDMFMALayout",
+    "BlockedLayout",
+    "DistributedLinearLayout",
+    "DotOperandLayout",
+    "PaddedSharedLayout",
+    "SliceLayout",
+    "SwizzledSharedLayout"
+  ],
+  "tile": {
+    "BLOCK_M": 256,
+    "BLOCK_N": 256,
+    "BLOCK_K": 64,
+    "num_warps": 4
+  },
+  "layouts": {
+    "blockedA": {
+      "source": "amd/gemm/00_naive.py",
+      "function": "v0_naive",
+      "line": 32,
+      "variable": "gLoadLayoutA",
+      "kind": "BlockedLayout",
+      "source_sha256": "6ca2117761dfa5b39a679a5db6b87a2a47ddf2922fa1d9404ad647340a1a571e",
+      "parameters": {
+        "size_per_thread": [
+          1,
+          8
+        ],
+        "threads_per_warp": [
+          8,
+          8
+        ],
+        "warps_per_cta": [
+          4,
+          1
+        ],
+        "order": [
+          1,
+          0
+        ]
+      },
+      "code": "gl.BlockedLayout(\n        [1, 8],  # sizePerThread\n        [512 // BLOCK_K, BLOCK_K // 8],  # threadsPerWarp\n        [4, 1],  # warpsPerCTA\n        [1, 0],  # order\n    )"
+    },
+    "blockedB": {
+      "source": "amd/gemm/00_naive.py",
+      "function": "v0_naive",
+      "line": 39,
+      "variable": "gLoadLayoutB",
+      "kind": "BlockedLayout",
+      "source_sha256": "6ca2117761dfa5b39a679a5db6b87a2a47ddf2922fa1d9404ad647340a1a571e",
+      "parameters": {
+        "size_per_thread": [
+          8,
+          1
+        ],
+        "threads_per_warp": [
+          8,
+          8
+        ],
+        "warps_per_cta": [
+          1,
+          4
+        ],
+        "order": [
+          0,
+          1
+        ]
+      },
+      "code": "gl.BlockedLayout(\n        [8, 1],  # sizePerThread\n        [BLOCK_K // 8, 512 // BLOCK_K],  # threadsPerWarp\n        [1, 4],  # warpsPerCTA\n        [0, 1],  # order\n    )"
+    },
+    "mfma3": {
+      "source": "amd/gemm/00_naive.py",
+      "function": "v0_naive",
+      "line": 61,
+      "variable": "mfmaLayout",
+      "kind": "AMDMFMALayout",
+      "source_sha256": "6ca2117761dfa5b39a679a5db6b87a2a47ddf2922fa1d9404ad647340a1a571e",
+      "parameters": {
+        "version": 3,
+        "instr_shape": [
+          16,
+          16,
+          16
+        ],
+        "transposed": true,
+        "warps_per_cta": [
+          2,
+          2
+        ]
+      },
+      "code": "gl.amd.AMDMFMALayout(\n        version=3, instr_shape=[16, 16, 16], transposed=True, warps_per_cta=[2, 2]\n    )"
+    },
+    "dotA4": {
+      "source": "amd/gemm/00_naive.py",
+      "function": "v0_naive",
+      "line": 65,
+      "variable": "dotOpLayoutA",
+      "kind": "DotOperandLayout",
+      "source_sha256": "6ca2117761dfa5b39a679a5db6b87a2a47ddf2922fa1d9404ad647340a1a571e",
+      "parameters": {
+        "operand_index": 0,
+        "parent": {
+          "reference": "mfmaLayout"
+        },
+        "k_width": 4
+      },
+      "code": "gl.DotOperandLayout(operand_index=0, parent=mfmaLayout, k_width=4)"
+    },
+    "dotB4": {
+      "source": "amd/gemm/00_naive.py",
+      "function": "v0_naive",
+      "line": 66,
+      "variable": "dotOpLayoutB",
+      "kind": "DotOperandLayout",
+      "source_sha256": "6ca2117761dfa5b39a679a5db6b87a2a47ddf2922fa1d9404ad647340a1a571e",
+      "parameters": {
+        "operand_index": 1,
+        "parent": {
+          "reference": "mfmaLayout"
+        },
+        "k_width": 4
+      },
+      "code": "gl.DotOperandLayout(operand_index=1, parent=mfmaLayout, k_width=4)"
+    },
+    "plainSharedA": {
+      "source": "amd/gemm/02_async_copy.py",
+      "function": "v0_naive",
+      "line": 46,
+      "variable": "sharedLayoutA",
+      "kind": "SwizzledSharedLayout",
+      "source_sha256": "7b36fb67cc33b01cd2c6d11e4ef604e8c1e019f8d5e255f5f80a1dec6b93110f",
+      "parameters": {
+        "vec": 1,
+        "per_phase": 1,
+        "max_phase": 1,
+        "order": [
+          1,
+          0
+        ]
+      },
+      "code": "gl.SwizzledSharedLayout(1, 1, 1, order=[1, 0])"
+    },
+    "plainSharedB": {
+      "source": "amd/gemm/02_async_copy.py",
+      "function": "v0_naive",
+      "line": 47,
+      "variable": "sharedLayoutB",
+      "kind": "SwizzledSharedLayout",
+      "source_sha256": "7b36fb67cc33b01cd2c6d11e4ef604e8c1e019f8d5e255f5f80a1dec6b93110f",
+      "parameters": {
+        "vec": 1,
+        "per_phase": 1,
+        "max_phase": 1,
+        "order": [
+          0,
+          1
+        ]
+      },
+      "code": "gl.SwizzledSharedLayout(1, 1, 1, order=[0, 1])"
+    },
+    "swizzledA": {
+      "source": "amd/gemm/03_lds.py",
+      "function": "v3_lds_swizzling",
+      "line": 48,
+      "variable": "sharedLayoutA",
+      "kind": "SwizzledSharedLayout",
+      "source_sha256": "6f9f2b269d0cf775495a9824b468469bdb258b179fa2f6befdc79fa82e1e0924",
+      "parameters": {
+        "vec": 8,
+        "per_phase": 2,
+        "max_phase": 8,
+        "order": [
+          1,
+          0
+        ]
+      },
+      "code": "gl.SwizzledSharedLayout(vec=8, per_phase=2, max_phase=8, order=[1, 0])"
+    },
+    "swizzledB": {
+      "source": "amd/gemm/03_lds.py",
+      "function": "v3_lds_swizzling",
+      "line": 49,
+      "variable": "sharedLayoutB",
+      "kind": "SwizzledSharedLayout",
+      "source_sha256": "6f9f2b269d0cf775495a9824b468469bdb258b179fa2f6befdc79fa82e1e0924",
+      "parameters": {
+        "vec": 8,
+        "per_phase": 2,
+        "max_phase": 8,
+        "order": [
+          0,
+          1
+        ]
+      },
+      "code": "gl.SwizzledSharedLayout(8, 2, 8, order=[0, 1])"
+    },
+    "dotA8": {
+      "source": "amd/gemm/03_lds.py",
+      "function": "v3_lds_swizzling",
+      "line": 70,
+      "variable": "dotOpLayoutA",
+      "kind": "DotOperandLayout",
+      "source_sha256": "6f9f2b269d0cf775495a9824b468469bdb258b179fa2f6befdc79fa82e1e0924",
+      "parameters": {
+        "operand_index": 0,
+        "parent": {
+          "reference": "mfmaLayout"
+        },
+        "k_width": 8
+      },
+      "code": "gl.DotOperandLayout(operand_index=0, parent=mfmaLayout, k_width=8)"
+    },
+    "dotB8": {
+      "source": "amd/gemm/03_lds.py",
+      "function": "v3_lds_swizzling",
+      "line": 71,
+      "variable": "dotOpLayoutB",
+      "kind": "DotOperandLayout",
+      "source_sha256": "6f9f2b269d0cf775495a9824b468469bdb258b179fa2f6befdc79fa82e1e0924",
+      "parameters": {
+        "operand_index": 1,
+        "parent": {
+          "reference": "mfmaLayout"
+        },
+        "k_width": 8
+      },
+      "code": "gl.DotOperandLayout(operand_index=1, parent=mfmaLayout, k_width=8)"
+    },
+    "linearA": {
+      "source": "amd/gemm/03_lds.py",
+      "function": "v3_lds_padding",
+      "line": 128,
+      "variable": "gLoadLayoutA",
+      "kind": "DistributedLinearLayout",
+      "source_sha256": "6f9f2b269d0cf775495a9824b468469bdb258b179fa2f6befdc79fa82e1e0924",
+      "parameters": {
+        "reg_bases": [
+          [
+            0,
+            1
+          ],
+          [
+            0,
+            2
+          ],
+          [
+            0,
+            4
+          ],
+          [
+            4,
+            0
+          ],
+          [
+            8,
+            0
+          ],
+          [
+            128,
+            0
+          ]
+        ],
+        "lane_bases": [
+          [
+            0,
+            8
+          ],
+          [
+            0,
+            16
+          ],
+          [
+            0,
+            32
+          ],
+          [
+            16,
+            0
+          ],
+          [
+            32,
+            0
+          ],
+          [
+            64,
+            0
+          ]
+        ],
+        "warp_bases": [
+          [
+            1,
+            0
+          ],
+          [
+            2,
+            0
+          ]
+        ],
+        "block_bases": [],
+        "shape": [
+          256,
+          64
+        ]
+      },
+      "code": "gl.DistributedLinearLayout(\n        reg_bases=[[0, 1], [0, 2], [0, 4], [4, 0], [8, 0], [128, 0]],\n        lane_bases=[[0, 8], [0, 16], [0, 32], [16, 0], [32, 0], [64, 0]],\n        warp_bases=[[1, 0], [2, 0]],\n        block_bases=[],\n        shape=[BLOCK_M, BLOCK_K],\n    )"
+    },
+    "linearB": {
+      "source": "amd/gemm/03_lds.py",
+      "function": "v3_lds_padding",
+      "line": 135,
+      "variable": "gLoadLayoutB",
+      "kind": "DistributedLinearLayout",
+      "source_sha256": "6f9f2b269d0cf775495a9824b468469bdb258b179fa2f6befdc79fa82e1e0924",
+      "parameters": {
+        "reg_bases": [
+          [
+            1,
+            0
+          ],
+          [
+            2,
+            0
+          ],
+          [
+            4,
+            0
+          ],
+          [
+            0,
+            4
+          ],
+          [
+            0,
+            8
+          ],
+          [
+            0,
+            128
+          ]
+        ],
+        "lane_bases": [
+          [
+            8,
+            0
+          ],
+          [
+            16,
+            0
+          ],
+          [
+            32,
+            0
+          ],
+          [
+            0,
+            16
+          ],
+          [
+            0,
+            32
+          ],
+          [
+            0,
+            64
+          ]
+        ],
+        "warp_bases": [
+          [
+            0,
+            1
+          ],
+          [
+            0,
+            2
+          ]
+        ],
+        "block_bases": [],
+        "shape": [
+          64,
+          256
+        ]
+      },
+      "code": "gl.DistributedLinearLayout(\n        reg_bases=[[1, 0], [2, 0], [4, 0], [0, 4], [0, 8], [0, 128]],\n        lane_bases=[[8, 0], [16, 0], [32, 0], [0, 16], [0, 32], [0, 64]],\n        warp_bases=[[0, 1], [0, 2]],\n        block_bases=[],\n        shape=[BLOCK_K, BLOCK_N],\n    )"
+    },
+    "paddedA": {
+      "source": "amd/gemm/03_lds.py",
+      "function": "v3_lds_padding",
+      "line": 143,
+      "variable": "sharedLayoutA",
+      "kind": "PaddedSharedLayout",
+      "source_sha256": "6f9f2b269d0cf775495a9824b468469bdb258b179fa2f6befdc79fa82e1e0924",
+      "parameters": {
+        "interval_padding_pairs": [
+          [
+            512,
+            16
+          ]
+        ],
+        "offset_bases": [
+          [
+            0,
+            1
+          ],
+          [
+            0,
+            2
+          ],
+          [
+            0,
+            4
+          ],
+          [
+            0,
+            8
+          ],
+          [
+            0,
+            16
+          ],
+          [
+            0,
+            32
+          ],
+          [
+            16,
+            0
+          ],
+          [
+            32,
+            0
+          ],
+          [
+            64,
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            2,
+            0
+          ],
+          [
+            4,
+            0
+          ],
+          [
+            8,
+            0
+          ],
+          [
+            128,
+            0
+          ]
+        ],
+        "cga_layout": [],
+        "shape": [
+          256,
+          64
+        ]
+      },
+      "code": "gl.PaddedSharedLayout(\n        [[512, 16]],\n        [\n            [0, 1],\n            [0, 2],\n            [0, 4],\n            [0, 8],\n            [0, 16],\n            [0, 32],\n            [16, 0],\n            [32, 0],\n            [64, 0],\n            [1, 0],\n            [2, 0],\n            [4, 0],\n            [8, 0],\n            [128, 0],\n        ],\n        [],\n        [BLOCK_M, BLOCK_K],\n    )"
+    },
+    "paddedB": {
+      "source": "amd/gemm/03_lds.py",
+      "function": "v3_lds_padding",
+      "line": 164,
+      "variable": "sharedLayoutB",
+      "kind": "PaddedSharedLayout",
+      "source_sha256": "6f9f2b269d0cf775495a9824b468469bdb258b179fa2f6befdc79fa82e1e0924",
+      "parameters": {
+        "interval_padding_pairs": [
+          [
+            512,
+            16
+          ]
+        ],
+        "offset_bases": [
+          [
+            1,
+            0
+          ],
+          [
+            2,
+            0
+          ],
+          [
+            4,
+            0
+          ],
+          [
+            8,
+            0
+          ],
+          [
+            16,
+            0
+          ],
+          [
+            32,
+            0
+          ],
+          [
+            0,
+            16
+          ],
+          [
+            0,
+            32
+          ],
+          [
+            0,
+            64
+          ],
+          [
+            0,
+            1
+          ],
+          [
+            0,
+            2
+          ],
+          [
+            0,
+            4
+          ],
+          [
+            0,
+            8
+          ],
+          [
+            0,
+            128
+          ]
+        ],
+        "cga_layout": [],
+        "shape": [
+          64,
+          256
+        ]
+      },
+      "code": "gl.PaddedSharedLayout(\n        [[512, 16]],\n        [\n            [1, 0],\n            [2, 0],\n            [4, 0],\n            [8, 0],\n            [16, 0],\n            [32, 0],\n            [0, 16],\n            [0, 32],\n            [0, 64],\n            [0, 1],\n            [0, 2],\n            [0, 4],\n            [0, 8],\n            [0, 128],\n        ],\n        [],\n        [BLOCK_K, BLOCK_N],\n    )"
+    },
+    "storeC": {
+      "source": "amd/gemm/06_loop_unroll.py",
+      "function": "v6_loop_unroll",
+      "line": 230,
+      "variable": "gStoreLayoutC",
+      "kind": "BlockedLayout",
+      "source_sha256": "b5ffe98fed219489e9ee5738578d6c5393cc9acee81457771bfc149561bd2da8",
+      "parameters": {
+        "size_per_thread": [
+          1,
+          8
+        ],
+        "threads_per_warp": [
+          2,
+          32
+        ],
+        "warps_per_cta": [
+          4,
+          1
+        ],
+        "order": [
+          1,
+          0
+        ]
+      },
+      "code": "gl.BlockedLayout([1, 8], [2, 32], [4, 1], [1, 0])"
+    }
+  },
+  "slices": {
+    "rows": "gl.SliceLayout(1, parent)",
+    "columns": "gl.SliceLayout(0, parent)"
+  }
+}
