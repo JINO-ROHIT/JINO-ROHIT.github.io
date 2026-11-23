@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Optimizing a GEMM on AMD GPUs with Gluon</title>
+  <link rel="stylesheet" href="./artifacts/mi300x/article.css" />
+</head>
+<body>
+  <a class="skip-link" href="#article">Skip to article</a>
+  <div class="page">
+    <nav class="site-nav" aria-label="Main navigation">
+      <a class="identity" href="../index.html">Jino Rohit</a>
+      <div><a href="../index.html">Home</a><a href="./blog.html">Blogs</a><a href="../projects/projects.html">Projects</a></div>
+    </nav>
+    <header class="article-header">
+      <h1>Outperforming rocBLAS on Mi300x using Gluon</h1>
+      <p class="byline">Jino Rohit ·  [WIP]</p>
+    </header>
+    <article id="article">
+      <p>This article will iteratively explore various optimization techniques for improving GEMM performance on AMD GPUs using gluon and eventually outperform rocBLAS on the Mi300x.</p>
+
+      <section id="mi300x">
+        <h2>MI300X Architecture</h2>
+        <p>Before you start this blog post, I'd highly recommend reading my earlier post that walks through the entire architecture of the Mi300x here <a href="./20_mi300x_gemm.html">Inside the MI300X</a>.</p>
+        <figure class="package-image">
+          <a href="./artifacts/mi300x/package-xcd-io-sketch.png">
+            <img src="./artifacts/mi300x/package-xcd-io-sketch.png" width="2100" height="1500" decoding="async" alt="Exploded view of the MI300X. Eight compute chiplets sit in pairs above four I/O dies, with HBM3 stacks around the edge of the package." />
+          </a>
+          <figcaption>Our GEMM runs on the compute chiplets. The I/O dies below them connect those chiplets to the HBM3 stacks that hold A, B, and C.</figcaption>
+        </figure>
+        <p>Once you understand the hardware, we can dive into the software optimizations.</p>
+      </section>
+
+
+      <section id="baseline">
+        <h2>Kernel 1 - dot product</h2>
+        <p>We have two matrices A and B of shape 4096 × 4096 both at fp16. The output matrix C will have the shape 4096 × 4096.</p>
+        <p>The design choice we have to make in this kernel is how much of C should one group of threads compute? For our simple kernel, let's give each workgroup(a block in CUDA lingo) a <strong>16 × 16 output tile</strong>. This means workgroup 0 owns rows 0–15 and columns 0–15 and so on. There are 4096 / 16 = 256 tiles across and 256 down, so we launch <strong>65,536 workgroups</strong>. Each has four waves.</p>
+
+        <figure class="package-image">
+          <a href="./artifacts/amd-gemm/naive-output-workgroups.png"><img src="./artifacts/amd-gemm/naive-output-workgroups.png" width="1425" height="1046" decoding="async" alt="Top-left corner of C, with one 16 by 16 tile per workgroup. The first tile row starts with IDs 0, 1, 2 and 3. The second starts with 256, 257, 258 and 259." /></a>
+        </figure>
+
+        <h3>What does one workgroup do?</h3>
+        <p>Here's the launch setup. The first two block sizes give us the output tile. The third, <code>BLOCK_K = 32</code>, tells us how many values of each dot product we'll sum on one pass.</p>
+        <pre><code>BLOCK_M, BLOCK_N, BLOCK_K = 16, 16, 32
+num_warps = 4</code></pre>
+        <p>For the first pass, workgroup 0 loads the first 32 values from each of its 16 rows of A and columns of B, creates a tile of 16x32 and 32x16 and accumulates the dot products. You then update the pointers by 32 across the K dimension and repeat.</p>
+        <pre><code>a_ptrs = a_ptr + rows[:, None] * stride_am + a_k[None, :] * stride_ak
+b_ptrs = b_ptr + cols[:, None] * stride_bn + b_k[None, :] * stride_bk
+
+acc = gl.full((BLOCK_M, BLOCK_N), 0, gl.float32, layout=c_layout)
+for k in range(0, gl.cdiv(K, BLOCK_K)):
+    remaining = K - k * BLOCK_K
+    a = gl.load(a_ptrs, (rows[:, None] &lt; M) &amp; (a_k[None, :] &lt; remaining), other=0)
+    b = gl.load(b_ptrs, (cols[:, None] &lt; N) &amp; (b_k[None, :] &lt; remaining), other=0)
+    products = a.to(gl.float32)[:, None, :] * b.to(gl.float32)[None, :, :]
+    acc += gl.sum(products, axis=2)
+    a_ptrs += BLOCK_K * stride_ak
+    b_ptrs += BLOCK_K * stride_bk</code></pre>
+
+        <p>With M = N = K = 4096 and FP16 inputs, our naive Triton kernel measured <strong>9.879713 TFLOP/s</strong>. On the same problem, rocBLAS measured <strong>598.596515 TFLOP/s</strong>.</p>
+        <figure class="package-image">
+          <a href="./artifacts/amd-gemm/naive-vs-rocblas.png"><img src="./artifacts/amd-gemm/naive-vs-rocblas.png" width="1589" height="725" decoding="async" alt="FP16 throughput for 4096-square GEMM on a shared linear scale starting at zero. Naive Triton reaches 9.88 TFLOP/s and rocBLAS reaches 598.60 TFLOP/s." /></a>
+        </figure>
+        <p>Our first kernel reaches 1.65% of rocBLAS performance. Looks like we have a lot of work to do!</p>
+      </section>
+
+    </article>
+  </div>
+</body>
+</html>
