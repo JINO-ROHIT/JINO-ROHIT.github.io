@@ -67,6 +67,115 @@ for k in range(0, gl.cdiv(K, BLOCK_K)):
         <p>Our first kernel reaches 1.65% of rocBLAS performance. Looks like we have a lot of work to do!</p>
       </section>
 
+      <section id="mfma">
+        <h2>Kernel 2 - MFMA</h2>
+        <h3>What's MFMA?</h3>
+        <p>MFMA stands for <strong>matrix fused multiply-add</strong>. It's an instruction that lets a wave use AMD's matrix cores to multiply two small tiles and add the result to a tile of running sums. Think of it as <code>acc = A @ B + acc</code>. Each entry in that result is still a dot product, just like in Kernel 1.</p>
+        <h3>Why use it for our dot products?</h3>
+        <p>In Kernel 1, <code>products</code> multiplies matching values and <code>gl.sum(products, axis=2)</code> adds them along K. Follow two outputs in the generated assembly. These two instructions run at different points in the loop.</p>
+        <pre><code>v_pk_mul_f32 v[82:83], v[64:65], v[78:79] op_sel_hi:[0,1]
+v_pk_fma_f32 v[62:63], v[62:63], v[76:77], v[82:83] op_sel_hi:[0,1,1]</code></pre>
+        <p>The multiply puts two FP32 products in <code>v82</code> and <code>v83</code>, one for each of two output columns. The multiply-add reads those products, adds another product to each, and leaves two partial sums in <code>v62</code> and <code>v63</code>. So far, each lane has only added the K values it holds. How does it get the rest?</p>
+        <pre><code>v_mov_b32_dpp v74, v62 quad_perm:[1,0,3,2] row_mask:0xf bank_mask:0xf bound_ctrl:1
+v_mov_b32_dpp v75, v63 quad_perm:[1,0,3,2] row_mask:0xf bank_mask:0xf bound_ctrl:1
+v_pk_add_f32 v[62:63], v[62:63], v[74:75]</code></pre>
+        <p>This is the last lane exchange for those two sums. Read <code>quad_perm:[1,0,3,2]</code> left to right. Lane 0 reads lane 1, lane 1 reads lane 0, and lanes 2 and 3 do the same within each group of four. The two moves fetch the neighbor’s partial sums into <code>v74</code> and <code>v75</code>. The packed add then adds them to the lane’s own two sums. Earlier rounds do the same with partners farther away. That's the work behind our <code>gl.sum</code>. <a href="./artifacts/amd-gemm/01_naive.s" download>Kernel 1 assembly</a>.</p>
+        <p>Now look at what <code>gl.amd.cdna3.mfma(a, b, acc)</code> generates in Kernel 2. These four instructions appear back to back for one 16 × 16 output patch.</p>
+        <pre><code>v_mfma_f32_16x16x16_f16 v[38:41], a[12:13], a[78:79], v[54:57]
+v_mfma_f32_16x16x16_f16 v[38:41], a[68:69], a[82:83], v[38:41]
+v_mfma_f32_16x16x16_f16 v[38:41], a[72:73], a[86:87], v[38:41]
+v_mfma_f32_16x16x16_f16 v[54:57], a[76:77], a[90:91], v[38:41]</code></pre>
+        <p>Read the first line from the outside in. The last operand, <code>v[54:57]</code>, holds the old sums. The first operand, <code>v[38:41]</code>, receives the updated sums. The two register pairs in the middle hold the FP16 inputs, four values per lane from each tile. Across 64 lanes, that gives the matrix core a 16 × 16 tile from A and a 16 × 16 tile from B. It adds 16 products to each of the 256 output sums in one wave instruction. Each lane gets four FP32 sums back.</p>
+        <p>Now follow <code>v[38:41]</code> from the first line to the last operand of the second. The next MFMA picks up exactly where the first left off, with new inputs for the next 16 positions along K. Four instructions cover all 64 K positions in this loop pass, and the fourth writes the sums back to <code>v[54:57]</code>. That's the payoff for our dot products. Each MFMA performs <strong>16 × 16 × 16 = 4,096 multiply-accumulates</strong>, including the sum along K that took explicit lane exchanges and adds in Kernel 1. <a href="./artifacts/amd-gemm/02_mfma.s" download>Kernel 2 assembly</a>.</p>
+        <h3>To better understand this instruction, let's take an example and follow it end to end</h3>
+        <p>Let's follow one number from the inputs to the store. We want <code>C[1, 0]</code>, so we need all 4096 values in row 1 of A and all 4096 values in column 0 of B. Indexing starts at zero.</p>
+        <p>In <code>00_naive_mfma.py</code>, we give each workgroup a 256 × 256 piece of C. Our 4096 × 4096 matrix fits 16 workgroups across and 16 down. That's 256 workgroups in the launch. Row 1 and column 0 both fall in the first square, so <strong>workgroup 0 owns our output</strong>.</p>
+        <figure class="package-image">
+          <a href="./artifacts/amd-gemm/output-workgroups.png"><img src="./artifacts/amd-gemm/output-workgroups.png" width="1389" height="987" loading="lazy" decoding="async" alt="A 16 by 16 grid of workgroups covers C. The upper-left square is workgroup 0 and covers rows and columns 0 through 255." /></a>
+          <figcaption>Start at the blue square. Each little square here holds 65,536 outputs. <a href="./artifacts/amd-gemm/output-workgroups.excalidraw" download>Download Excalidraw source</a>.</figcaption>
+        </figure>
+        <pre><code>BLOCK_M, BLOCK_N, BLOCK_K = 256, 256, 64
+num_warps = 4
+GRID_MN = triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N)
+grid = (GRID_MN, 1)</code></pre>
+        <h3>2. Which of the four waves owns it?</h3>
+        <p>Zoom into the first 32 rows and columns of that blue square. The kernel sets <code>warps_per_cta=[2, 2]</code>. That gives us two rows of waves, with two waves per row. In this kernel a warp is an AMD wave with 64 lanes numbered 0–63. Each wave has its own lane 1.</p>
+        <figure class="package-image">
+          <a href="./artifacts/amd-gemm/four-wave-tile.png"><img src="./artifacts/amd-gemm/four-wave-tile.png" width="1240" height="1240" loading="lazy" decoding="async" alt="Top-left 32 by 32 region of workgroup 0. Wave 0 is upper left, wave 1 upper right, wave 2 lower left and wave 3 lower right. C[1,0] is marked inside wave 0." /></a>
+          <figcaption>The orange cell is ours. The other three waves work on the adjacent patches. <a href="./artifacts/amd-gemm/four-wave-tile.excalidraw" download>Download Excalidraw source</a>.</figcaption>
+        </figure>
+        <p>Rows 0–15 and columns 0–15 belong to <strong>wave 0</strong>. That's the wave we'll follow. The same four waves cover the next 32 × 32 region, and the next. There are 8 × 8 such regions in the workgroup tile, so each wave owns 64 patches. That's how four waves cover more than 1024 outputs.</p>
+        <figure class="package-image">
+          <a href="./artifacts/amd-gemm/workgroup-wave-patches.png"><img src="./artifacts/amd-gemm/workgroup-wave-patches.png" width="1460" height="1247" loading="lazy" decoding="async" alt="Workgroup 0's 256 × 256 tile has 8 rows of 8 regions. In every region, wave 0 owns the upper-left 16 × 16 patch, wave 1 the upper right, wave 2 the lower left and wave 3 the lower right. The first region is enlarged to show C[1,0] in wave 0." /></a>
+          <figcaption>Follow the blue 0s across the top. Wave 0 owns columns 0–15 in the first region, then columns 32–47 in the next. Count all the blue patches and you get 8 across × 8 down = 64 for wave 0 alone. <a href="./artifacts/amd-gemm/workgroup-wave-patches.excalidraw" download>Download Excalidraw source</a>.</figcaption>
+        </figure>
+        <h3>3. Load the inputs, then put them in MFMA order</h3>
+        <p>On the first pass, the workgroup loads 64 positions along K. It reads 256 rows × 64 columns from A and 64 rows × 256 columns from B. For our first instruction, zoom in on K = 0–15. Wave 0 needs a 16 × 16 tile from each input.</p>
+        <pre><code>ga = gl.load(a_ptrs, mask=offs_ak[None, :] &lt; K - k * BLOCK_K, other=0.0)
+gb = gl.load(b_ptrs, mask=offs_bk[:, None] &lt; K - k * BLOCK_K, other=0.0)
+a = gl.convert_layout(ga, layout=dotOpLayoutA)
+b = gl.convert_layout(gb, layout=dotOpLayoutB)</code></pre>
+        <p>Why convert? Take the first eight values in A row 1. The load layout gives all eight to wave 0, lane 8. MFMA expects four values per lane along K. After conversion, lane 1 has the first four and lane 17 has the next four. They're still the same eight numbers. Here's where every input lives when wave 0 issues the instruction.</p>
+        <figure class="package-image">
+          <a href="./artifacts/amd-gemm/mfma-input-lanes.png"><img src="./artifacts/amd-gemm/mfma-input-lanes.png" width="1324" height="1582" loading="lazy" decoding="async" alt="Full 16 by 16 A tile labelled by lane. In each row r the four groups across belong to lanes r, r+16, r+32 and r+48. Row 1 is highlighted." /></a>
+          <figcaption>Try row 0 first. Lane 0 supplies K = 0–3. Lane 1 supplies those same K positions in <em>row 1</em>. After all 16 rows have a lane, lane 16 starts the next four K positions in row 0. One row down from there is lane 17. <a href="./artifacts/amd-gemm/mfma-input-lanes.excalidraw" download>Download Excalidraw source</a>. <a href="https://rocm.blogs.amd.com/software-tools-optimization/matrix-cores/README.html">AMD’s matrix cores walkthrough</a>.</figcaption>
+        </figure>
+        <figure class="package-image">
+          <a href="./artifacts/amd-gemm/mfma-b-lanes.png"><img src="./artifacts/amd-gemm/mfma-b-lanes.png" width="1324" height="1582" loading="lazy" decoding="async" alt="Full 16 by 16 B tile labelled by lane. In each column j the groups down the column belong to lanes j, j+16, j+32 and j+48. Column 0 is highlighted." /></a>
+          <figcaption>Now read <em>down</em> column 0 of B. Lane 0 supplies K = 0–3. Lane 16 supplies K = 4–7. Match each color to the same color in A. <a href="./artifacts/amd-gemm/mfma-b-lanes.excalidraw" download>Download Excalidraw source</a>.</figcaption>
+        </figure>
+        <h3>4. Pair each value in row 1 of A with a value in column 0 of B</h3>
+        <p>Put one finger on <code>A[1, 0]</code> and another on <code>B[0, 0]</code>. Multiply those two values. Now move one cell <strong>right in A</strong> and one cell <strong>down in B</strong>. Multiply again. The row of A stays 1 and the column of B stays 0. Only the shared index <code>k</code> moves. Every product <code>A[1, k] × B[k, 0]</code> adds to the same output, <code>C[1, 0]</code>.</p>
+        <p>Let's put numbers in the blue cells. Say lane 1 holds <code>[1, 2, 3, 4]</code> from A and lane 0 holds <code>[4, 3, 2, 1]</code> from B, in order of increasing <code>k</code>. At <code>k = 1</code>, for instance, the second value in each list gives us <code>2 × 3 = 6</code>. You can read all four pairs below.</p>
+        <figure class="package-image">
+          <a href="./artifacts/amd-gemm/mfma-dot-groups.png"><img src="./artifacts/amd-gemm/mfma-dot-groups.png" width="1340" height="1477" loading="lazy" decoding="async" alt="For k from 0 to 3, the pairs from A row 1 and B column 0 give 1 × 4, 2 × 3, 3 × 2 and 4 × 1. Their products add to 20. Each of the remaining three groups contributes 4, bringing the first MFMA update to 32." /></a>
+          <figcaption>Read each blue line from left to right to get one product. Then add the four products from top to bottom. <a href="./artifacts/amd-gemm/mfma-dot-groups.excalidraw" download>Download Excalidraw source</a>.</figcaption>
+        </figure>
+        <p>The blue cells contribute 20. For the rest of this example, let all remaining values in this row and column be 1. The next twelve pairs each contribute <code>1 × 1</code>. So the first MFMA takes the running sum for <code>C[1, 0]</code> from zero to <strong>20 + 4 + 4 + 4 = 32</strong>. All four colors belong to that one instruction.</p>
+        <h3>5. Where does the 32 for C[1, 0] go?</h3>
+        <p>Wave 0 just added up the first 16 products for <code>C[1, 0]</code> and got <strong>32</strong>. Find row 1, column 0 in the output tile below. That cell is labelled <strong>1</strong> because <em>lane 1</em> keeps its running sum.</p>
+        <figure class="package-image">
+          <a href="./artifacts/amd-gemm/mfma-output-lanes.png"><img src="./artifacts/amd-gemm/mfma-output-lanes.png" width="1324" height="2059" loading="lazy" decoding="async" alt="In wave 0’s output tile, row 1, columns 0 through 3 all belong to lane 1. Enlarged below the tile, its four accumulator slots correspond to C[1,0], C[1,1], C[1,2] and C[1,3]. Slot 0 holds 32 after the first instruction." /></a>
+          <figcaption>Read the four shaded cells left to right. With this kernel’s <code>transposed=True</code> layout, each column here gets its own FP32 register in lane 1. <a href="./artifacts/amd-gemm/mfma-output-lanes.excalidraw" download>Download Excalidraw source</a>. <a href="https://github.com/ROCm/amd_matrix_instruction_calculator">AMD Matrix Instruction Calculator</a>.</figcaption>
+        </figure>
+        <p>Why do all four cells say <code>1</code>? Each label answers “which lane keeps this sum?” All four answers are lane 1. The slot tells us <em>which sum</em> inside that lane. For the first 16 K positions, the four slots use these inputs:</p>
+        <pre><code>slot 0    A row 1 · B column 0    →    C[1,0]    (32 so far)
+slot 1    A row 1 · B column 1    →    C[1,1]
+slot 2    A row 1 · B column 2    →    C[1,2]
+slot 3    A row 1 · B column 3    →    C[1,3]</code></pre>
+        <p>For example, if the first 16 entries of B column 1 were zero, every product for slot 1 would be zero. Lane 1 would then hold <strong>32 in slot 0 and 0 in slot 1</strong> after the same instruction. Each slot keeps accumulating its own output. For slot 0, the next sixteen products of <code>1 × 1</code> take its sum from 32 to 48.</p>
+        <h3>6. Keep the same output and move along K</h3>
+        <pre><code>acc = gl.zeros((BLOCK_M, BLOCK_N), gl.float32, mfmaLayout)
+for k in range(0, gl.cdiv(K, BLOCK_K)):
+    # Load and convert the next pair of tiles as above.
+    acc = gl.amd.cdna3.mfma(a, b, acc)
+    a_ptrs += BLOCK_K * stride_ak
+    b_ptrs += BLOCK_K * stride_bk</code></pre>
+        <p>That <code>mfma(a, b, acc)</code> call covers the workgroup's tiles. A hardware instruction only consumes 16 K positions, so each 16 × 16 patch needs four instructions in this 64-wide loop pass. Follow just our one register in wave 0, lane 1.</p>
+        <pre><code>K positions       C[1,0] running sum
+start             0
+   0–15           0 + 32 = 32
+  16–31          32 + 16 = 48
+  32–47          48 + 16 = 64
+  48–63          64 + 16 = 80    end of the first loop pass
+   ...
+4080–4095      4096 + 16 = 4112</code></pre>
+        <p>Each new pass moves 64 columns across A and 64 rows down B. After 64 passes, that one output has received 256 updates × 16 products = 4096 products. The kernel casts the FP32 accumulator to FP16 and stores it.</p>
+        <pre><code>c = acc.to(a_ptr.dtype.element_ty)
+# The store uses the same layout as the accumulator.
+gl.store(c_ptrs, c, mask=c_mask)</code></pre>
+        <p>For our example, <strong>workgroup 0, wave 0, lane 1 writes 4112 to C[1, 0]</strong>.</p>
+        <figure class="package-image">
+          <a href="./artifacts/amd-gemm/mfma-vs-rocblas.png"><img src="./artifacts/amd-gemm/mfma-vs-rocblas.png" width="1574" height="725" decoding="async" alt="FP16 GEMM throughput at M = N = K = 4096. Triton MFMA reaches 224.86 TFLOP/s and rocBLAS reaches 595.99 TFLOP/s on the same 0–600 scale." /></a>
+        </figure>
+        <p>With MFMA we're at 37.73% of rocBLAS performance, up from 1.65% with our first kernel.</p>
+      </section>
+
+
+        <h2>Where did the time go?</h2>
+        <p>For Kernel 2 we also have a separate MI300X trace with 1024 × 1024 inputs. At 256 × 256 outputs per workgroup that's only 16 workgroups in the launch. The four recorded waves each have 1024 / 64 = 16 K steps. The wait at <code>0x3850</code> shows 64 hits, consistent with each wave reaching it once per step.</p>
+        <p>What is the wave waiting for? There's a <code>scratch_load_dwordx2</code> earlier in the same region. To tell how much of the wait comes from loading A or B, we'd have to check which memory operations are still outstanding at <code>s_waitcnt vmcnt(0)</code>.</p>
+      </section>
     </article>
   </div>
 </body>
